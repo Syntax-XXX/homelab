@@ -13,8 +13,13 @@ set -a; . ./.env; set +a
 H=${HOST_IP:-127.0.0.1}
 
 key() { sudo sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' "$APPDATA/$1/config.xml"; }
-api() { # api <port> <apikey> <method> <path> [json]
-  curl -fsS -X "$3" "http://$H:$1/api/$4" -H "X-Api-Key: $2" -H 'Content-Type: application/json' ${5:+-d "$5"}
+api() { # api <port> <apikey> <method> <path> [json] – Key und Body nicht in der Prozessliste
+  local cfg; cfg=$(printf 'header = "X-Api-Key: %s"' "$2")
+  if [ -n "${5:-}" ]; then
+    printf '%s' "$5" | curl -fsS -X "$3" "http://$H:$1/api/$4" -K <(echo "$cfg") -H 'Content-Type: application/json' --data-binary @-
+  else
+    curl -fsS -X "$3" "http://$H:$1/api/$4" -K <(echo "$cfg")
+  fi
 }
 has() { python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if any($1 for x in d) else 1)"; }
 

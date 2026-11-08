@@ -148,9 +148,13 @@ docs/                 Anleitungen
 
 ## Sicherheit
 
+**Bewusstes Design:** Alles läuft **nur im Heimnetz bzw. über Tailscale (WireGuard-verschlüsselt)**. Deshalb sprechen die Dienste intern HTTP und Caddy hat `auto_https off`. Willst du etwas ins Internet stellen, nimm Caddy mit echter Domain + automatischem HTTPS oder einen Cloudflare-Tunnel – nie einfach Ports im Router öffnen.
+
 - Alle Passwörter/Tokens stehen ausschließlich in `.env`-Dateien (in `.gitignore`), nie in Compose-Dateien.
 - Dienste sind nur im LAN bzw. über Tailscale erreichbar – **keine Portfreigaben im Router**.
 - Jeder Push durchläuft gitleaks + KI-Review, bevor er auf GitHub landet.
+- Agents (Port 9101/9102) sind Token-geschützt; binde sie an die LAN-IP und erlaube sie per Firewall nur dem Dashboard-Host.
+- Guacamole: SSH-Keys in Verbindungen sind für Guacamole-Admins sichtbar – Admin-Rechte nur für dich.
 
 ## Lizenz
 

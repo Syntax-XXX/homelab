@@ -3,7 +3,8 @@ Description=Selfhost dashboard Docker agent
 After=docker.service network-online.target
 Requires=docker.service
 [Service]
-Environment=BIND=0.0.0.0  # besser: die LAN-IP dieses Hosts
+# LAN-IP dieses Hosts eintragen (nicht 0.0.0.0); Port 9102 per Firewall nur fürs Dashboard öffnen
+Environment=BIND=192.168.1.22
 ExecStart=/usr/bin/python3 /opt/selfhost-dash-agent/docker-agent.py
 Restart=always
 RestartSec=5
