@@ -91,3 +91,17 @@ Einrichtung:
 | `GITHUB_USER` / `GITHUB_TOKEN` | GitHub → Settings → Developer settings → **Fine-grained token**, Repository access „All repositories“, Permissions: *Administration* + *Contents* = Read and write |
 
 Bei gitleaks-Treffern oder ⛔ fragt die Oberfläche extra nach, bevor gepusht wird.
+
+## 4. Telegram-Bot (eigener Bot nur für Builds)
+
+Das Release-Center hat einen eingebauten Bot (Token von @BotFather in `TELEGRAM_BOT_TOKEN`, deine Chat-ID in `TELEGRAM_CHAT_ID` – nur diese Chats dürfen steuern):
+
+| Befehl / Knopf | Wirkung |
+|---|---|
+| automatisch | Nachricht nach jedem Build: KI-Urteil, gitleaks, Knöpfe |
+| 🚀 Pushen | pusht den geprüften Commit (fragt beim ersten Mal öffentlich/privat, bei Secrets/⛔ extra nach) |
+| ❌ Ablehnen · 🔄 Neu prüfen · 📄 Details | wie im Web |
+| `/pending` | alles, was auf Freigabe wartet |
+| `/builds` | letzte Builds aller Projekte |
+| `/repos` | Projekte mit Knopf „▶️ bauen“ |
+| `/run <repo>` | Workflow manuell starten (braucht `workflow_dispatch`) |

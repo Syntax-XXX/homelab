@@ -42,10 +42,6 @@ async function gh(p, opts = {}) {
   const r = await fetch('https://api.github.com' + p, { ...opts, headers: { Authorization: 'Bearer ' + CFG.ghToken, Accept: 'application/vnd.github+json', 'User-Agent': 'homelab-release-center', ...(opts.headers || {}) }, signal: AbortSignal.timeout(30000) });
   return { status: r.status, body: r.status === 204 ? null : await r.json().catch(() => null) };
 }
-async function telegram(text) {
-  if (!CFG.telegramToken || !CFG.telegramChat) return;
-  try { await fetch(`https://api.telegram.org/bot${CFG.telegramToken}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: CFG.telegramChat, text, parse_mode: 'HTML', disable_web_page_preview: true }) }); } catch {}
-}
 
 // ---------- local mirror of a Forgejo repo (for diffs, scans and pushing)
 async function mirror(full) {
@@ -97,7 +93,7 @@ async function reviewNow(item) {
     item.status = 'pending'; item.reviewedAt = Date.now();
     log('reviewed', item.repo, item.sha.slice(0, 7), item.ai.verdict, 'secrets:', item.secrets.length);
     const icon = { ok: '✅', warn: '⚠️', block: '⛔' }[item.ai.verdict];
-    telegram(`📦 <b>Build fertig</b>: ${item.repo}\n${esc(item.title)}\nKI: ${icon} ${esc(item.ai.summary).slice(0, 300)}${item.secrets.length ? `\n🔑 ${item.secrets.length} mögliche Secrets!` : ''}\n➡️ Freigabe: ${E.PUBLIC_URL || ''}`);
+    notifyItem(item);
   } catch (e) { item.status = 'error'; item.error = e.message; log('review failed', item.repo, e.message); }
   save();
 }
@@ -190,7 +186,7 @@ async function push(item, { visibility, ghName, force }) {
   // older pending builds of the same repo are superseded
   for (const o of Object.values(state.items)) if (o.repo === item.repo && o.status === 'pending' && o.created < item.created) o.status = 'superseded';
   save(); log('pushed', item.repo, '->', item.ghUrl);
-  telegram(`🚀 <b>${item.repo}</b> auf GitHub gepusht: ${item.ghUrl}`);
+  notify(`🚀 <b>${esc(item.repo.split('/')[1])}</b> ist auf GitHub: ${item.ghUrl}`);
 }
 
 // ---------- poll Forgejo for finished runs
@@ -205,6 +201,7 @@ async function poll() {
         state.items[id] = { id, repo: repo.full_name, runId: run.id, title: run.title, sha: run.commit_sha, branch: run.prettyref || 'main',
           runUrl: run.html_url, build: run.status, created: Date.parse(run.stopped || run.updated) || Date.now(), status: run.status === 'success' ? 'queued' : 'failed' };
         save();
+        if (run.status !== 'success') notifyItem(state.items[id]);
         if (run.status === 'success') {
           for (const o of Object.values(state.items)) if (o.repo === repo.full_name && o.id !== id && ['pending', 'error', 'queued'].includes(o.status) && o.created <= state.items[id].created) o.status = 'superseded';
           review(state.items[id]);
@@ -213,6 +210,151 @@ async function poll() {
     }
   } catch (e) { log('poll', e.message); }
   setTimeout(poll, 60000);
+}
+
+// ---------- Telegram-Bot: Steuerung von Release-Center + Forgejo (long polling, nur erlaubte Chats)
+const TG_CHATS = String(CFG.telegramChat || '').split(',').map(s => s.trim()).filter(Boolean);
+async function tg(method, body, timeout = 20000) {
+  const r = await fetch(`https://api.telegram.org/bot${CFG.telegramToken}/${method}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeout) });
+  return r.json();
+}
+const VERD_TG = { ok: '✅ Sieht gut aus', warn: '⚠️ Bitte prüfen', block: '⛔ Nicht pushen' };
+const short = it => `<b>${esc(it.repo.split('/')[1])}</b> · <code>${esc(it.sha.slice(0, 7))}</code>`;
+function itemText(it, details = false) {
+  const st = { queued: '⏳ wartet auf Prüfung', reviewing: '🔍 wird geprüft', pending: '🟡 wartet auf Freigabe', pushed: '🚀 gepusht', rejected: '❌ abgelehnt', superseded: '↪️ ersetzt', failed: '💥 Build fehlgeschlagen', error: '⚠️ Prüfung fehlgeschlagen' }[it.status] || it.status;
+  let t = `${short(it)}\n${esc(it.title)}\n${st}${it.progress ? ` (${esc(it.progress)})` : ''}`;
+  if (it.ai) t += `\n\nKI: ${VERD_TG[it.ai.verdict] || it.ai.verdict}\n${esc(it.ai.summary).slice(0, details ? 1500 : 400)}`;
+  if (it.secrets?.length) t += `\n🔑 gitleaks: ${it.secrets.length} mögliche Secrets`;
+  if (details && it.ai?.findings?.length) t += '\n\n' + it.ai.findings.slice(0, 10).map(f => `• <i>${esc(f.severity)}</i> ${esc(f.file || '')}${f.line ? ':' + f.line : ''} – ${esc(f.text)}`).join('\n');
+  if (details && it.secrets?.length) t += '\n\n' + it.secrets.slice(0, 8).map(s => `🔑 ${esc(s.file)}:${s.line} (${esc(s.rule)})`).join('\n');
+  if (it.error) t += `\n\nFehler: ${esc(it.error).slice(0, 300)}`;
+  if (it.ghUrl) t += `\n${it.ghUrl}`;
+  return t.slice(0, 4000);
+}
+function itemKb(it) {
+  const rows = [];
+  if (['pending', 'error'].includes(it.status)) {
+    rows.push([{ text: '🚀 Pushen', callback_data: `p|${it.id}` }, { text: '❌ Ablehnen', callback_data: `x|${it.id}` }]);
+    rows.push([{ text: '🔄 Neu prüfen', callback_data: `r|${it.id}` }, { text: '📄 Details', callback_data: `d|${it.id}` }]);
+  } else if (it.status === 'failed' || it.status === 'pushed') rows.push([{ text: '📄 Details', callback_data: `d|${it.id}` }]);
+  rows.push([{ text: '🔗 Build-Log', url: (CFG.forgejoPublic || CFG.forgejo) + new URL(it.runUrl).pathname }]);
+  return { inline_keyboard: rows };
+}
+async function notify(text, reply_markup) {
+  if (!CFG.telegramToken || !TG_CHATS.length) return;
+  for (const chat_id of TG_CHATS) { try { await tg('sendMessage', { chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, ...(reply_markup ? { reply_markup } : {}) }); } catch {} }
+}
+const notifyItem = it => notify(itemText(it), itemKb(it));
+
+const HELP = `<b>git.local – Build &amp; Release</b>
+/pending – Builds, die auf Freigabe warten
+/builds – letzte Builds aller Projekte
+/repos – Projekte (mit Knopf „Build starten“)
+/run &lt;repo&gt; – Build manuell starten
+/help – diese Hilfe
+
+Nach jedem Build kommt eine Nachricht mit KI-Urteil und Knöpfen zum Pushen.`;
+
+async function workflowsOf(full) {
+  try { const l = await fj(`/repos/${full}/contents/.forgejo/workflows`); return l.filter(f => /\.ya?ml$/.test(f.name)).map(f => f.name); } catch { return []; }
+}
+async function runBuild(full) {
+  const repo = await fj(`/repos/${full}`);
+  const wfs = await workflowsOf(full);
+  if (!wfs.length) return `Kein Workflow in ${full} (.forgejo/workflows fehlt).`;
+  const done = [];
+  for (const wf of wfs) {
+    const r = await fetch(`${CFG.forgejo}/api/v1/repos/${full}/actions/workflows/${wf}/dispatches`, { method: 'POST', headers: { Authorization: 'token ' + CFG.forgejoToken, 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: repo.default_branch || 'main' }) });
+    done.push(`${wf}: ${r.ok ? 'gestartet ▶️' : 'nicht startbar (' + r.status + ', braucht „workflow_dispatch“)'}`);
+  }
+  return `<b>${esc(full)}</b>\n` + done.map(esc).join('\n');
+}
+async function findRepo(name) {
+  const repos = await fj('/user/repos?limit=100');
+  return repos.find(r => r.name.toLowerCase() === name.toLowerCase() || r.full_name.toLowerCase() === name.toLowerCase());
+}
+
+async function onMessage(m) {
+  const chat = String(m.chat.id), text = (m.text || '').trim();
+  if (!TG_CHATS.includes(chat)) return tg('sendMessage', { chat_id: m.chat.id, text: `Nicht freigeschaltet. Deine Chat-ID: ${chat}` });
+  const [cmd, ...args] = text.split(/\s+/); const c = cmd.replace(/@.*/, '').toLowerCase();
+  const send = (t, kb) => tg('sendMessage', { chat_id: m.chat.id, text: t, parse_mode: 'HTML', disable_web_page_preview: true, ...(kb ? { reply_markup: kb } : {}) });
+  if (c === '/start' || c === '/help') return send(HELP);
+  if (c === '/pending') {
+    const its = Object.values(state.items).filter(i => ['pending', 'error', 'queued', 'reviewing'].includes(i.status)).sort((a, b) => b.created - a.created);
+    if (!its.length) return send('Nichts wartet auf Freigabe. ✨');
+    for (const it of its.slice(0, 8)) await send(itemText(it), itemKb(it));
+    return;
+  }
+  if (c === '/builds') {
+    const repos = await fj('/user/repos?limit=100'); const runs = [];
+    for (const r of repos) for (const run of ((await fj(`/repos/${r.full_name}/actions/runs?limit=4`)).workflow_runs || [])) runs.push({ repo: r.name, ...run });
+    runs.sort((a, b) => Date.parse(b.created) - Date.parse(a.created));
+    const ic = { success: '✅', failure: '❌', running: '🔄', waiting: '⏳', cancelled: '⛔', blocked: '⏸' };
+    return send('<b>Letzte Builds</b>\n' + runs.slice(0, 12).map(r => `${ic[r.status] || '•'} <b>${esc(r.repo)}</b> <code>${esc(r.commit_sha.slice(0, 7))}</code> ${esc(r.title).slice(0, 40)} · ${new Date(r.created).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Europe/Berlin' })}`).join('\n'));
+  }
+  if (c === '/repos') {
+    const repos = await fj('/user/repos?limit=100');
+    const kb = { inline_keyboard: repos.map(r => [{ text: `▶️ ${r.name} bauen`, callback_data: `b|${r.full_name}` }]) };
+    return send('<b>Projekte</b>\n' + repos.map(r => { const p = state.repos[r.full_name]; return `• <b>${esc(r.name)}</b>${p?.ghUrl || p?.ghName ? ` → github.com/${esc(CFG.ghUser)}/${esc(p.ghName)}` : ''}`; }).join('\n'), kb);
+  }
+  if (c === '/run') {
+    if (!args[0]) return send('Benutzung: /run &lt;repo&gt;');
+    const r = await findRepo(args[0]); if (!r) return send('Repo nicht gefunden.');
+    return send(await runBuild(r.full_name));
+  }
+  return send(HELP);
+}
+
+async function onCallback(q) {
+  const chat = String(q.message?.chat?.id);
+  const answer = (text, alert = false) => tg('answerCallbackQuery', { callback_query_id: q.id, text, show_alert: alert });
+  if (!TG_CHATS.includes(chat)) return answer('Nicht freigeschaltet');
+  const [a, id, extra] = q.data.split('|');
+  if (a === 'b') { await answer('Starte Build …'); return tg('sendMessage', { chat_id: chat, text: await runBuild(id), parse_mode: 'HTML' }); }
+  const it = state.items[id]; if (!it) return answer('Eintrag nicht mehr vorhanden', true);
+  const edit = () => tg('editMessageText', { chat_id: chat, message_id: q.message.message_id, text: itemText(it), parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: itemKb(it) }).catch(() => {});
+  if (a === 'd') { await answer(''); return tg('sendMessage', { chat_id: chat, text: itemText(it, true), parse_mode: 'HTML', disable_web_page_preview: true }); }
+  if (a === 'x') { it.status = 'rejected'; save(); await answer('Abgelehnt'); return edit(); }
+  if (a === 'r') { review(it); await answer('Neue Prüfung gestartet'); return edit(); }
+  if (a === 'p') {
+    const first = !state.repos[it.repo]?.pushedSha;
+    if (first && !extra) {
+      await answer('');
+      return tg('sendMessage', { chat_id: chat, text: `${short(it)} wird ein <b>neues</b> GitHub-Repo. Sichtbarkeit?`, parse_mode: 'HTML',
+        reply_markup: { inline_keyboard: [[{ text: '🌍 Öffentlich', callback_data: `p|${id}|public` }, { text: '🔒 Privat', callback_data: `p|${id}|private` }]] } });
+    }
+    if ((it.secrets?.length || it.ai?.verdict === 'block') && extra !== 'force' && !extra?.startsWith('f')) {
+      await answer('');
+      return tg('sendMessage', { chat_id: chat, text: `⚠️ ${short(it)}: ${it.secrets?.length ? `gitleaks fand ${it.secrets.length} mögliche Secrets` : 'die KI rät ab'}. Trotzdem pushen?`, parse_mode: 'HTML',
+        reply_markup: { inline_keyboard: [[{ text: '⚠️ Trotzdem pushen', callback_data: `p|${id}|f${extra || ''}` }, { text: 'Abbrechen', callback_data: `n|${id}` }]] } });
+    }
+    await answer('Pushe …');
+    try {
+      const vis = (extra || '').replace(/^f/, '') || undefined;
+      await push(it, { visibility: vis, force: extra?.startsWith('f') || undefined });
+    } catch (e) { await tg('sendMessage', { chat_id: chat, text: `❌ Push fehlgeschlagen: ${esc(e.message).slice(0, 500)}`, parse_mode: 'HTML' }); }
+    return;
+  }
+  if (a === 'n') return answer('Abgebrochen');
+}
+
+async function tgLoop() {
+  if (!CFG.telegramToken) return;
+  try {
+    await tg('setMyCommands', { commands: [{ command: 'pending', description: 'Builds zur Freigabe' }, { command: 'builds', description: 'Letzte Builds' }, { command: 'repos', description: 'Projekte / Build starten' }, { command: 'run', description: 'Build starten: /run <repo>' }, { command: 'help', description: 'Hilfe' }] });
+  } catch {}
+  let offset = 0;
+  for (;;) {
+    try {
+      const r = await tg('getUpdates', { offset, timeout: 50, allowed_updates: ['message', 'callback_query'] }, 65000);
+      for (const u of r.result || []) {
+        offset = u.update_id + 1;
+        try { if (u.message) await onMessage(u.message); else if (u.callback_query) await onCallback(u.callback_query); }
+        catch (e) { log('telegram handler', e.message); }
+      }
+    } catch (e) { log('telegram poll', e.message); await sleep(5000); }
+  }
 }
 
 // ---------- HTTP
@@ -247,4 +389,4 @@ http.createServer(async (req, res) => {
   if (!f) { res.writeHead(404); return res.end(); }
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
   fs.createReadStream(path.join(PUBLIC, f)).pipe(res);
-}).listen(CFG.port, () => { log(`release-center on :${CFG.port} · github ${CFG.ghUser ? CFG.ghUser : 'nicht verbunden'} · ki ${CFG.groqKey ? CFG.groqModel : 'aus'}`); poll(); });
+}).listen(CFG.port, () => { log(`release-center on :${CFG.port} · github ${CFG.ghUser ? CFG.ghUser : 'nicht verbunden'} · ki ${CFG.groqKey ? CFG.groqModel : 'aus'}`); poll(); tgLoop(); });
