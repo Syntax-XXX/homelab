@@ -59,8 +59,16 @@ async function mirror(full) {
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
 // ---------- review = gitleaks + LLM
-async function review(item) {
-  item.status = 'reviewing'; item.error = null; save();
+// reviews run one after another – they share the Groq rate limit
+let reviewChain = Promise.resolve();
+function review(item) {
+  item.status = 'queued'; item.error = null; item.progress = 'wartet auf freie KI'; save();
+  const run = reviewChain.then(() => reviewNow(item));
+  reviewChain = run.catch(() => {});
+  return run;
+}
+async function reviewNow(item) {
+  item.status = 'reviewing'; item.error = null; item.progress = null; save();
   try {
     const dir = await mirror(item.repo);
     const base = state.repos[item.repo]?.pushedSha;
@@ -100,7 +108,7 @@ const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&
 const CHUNK = +E.AI_CHUNK_CHARS || 14000, MAX_CHUNKS = +E.AI_MAX_CHUNKS || 8;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function groq(messages, maxTokens = 1500) {
-  for (let attempt = 0; attempt < 6; attempt++) {
+  for (let attempt = 0; attempt < 20; attempt++) {
     const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST', headers: { Authorization: 'Bearer ' + CFG.groqKey, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(120000),
       body: JSON.stringify({ model: CFG.groqModel, temperature: 0.1, max_tokens: maxTokens, response_format: { type: 'json_object' }, messages }),
@@ -197,7 +205,10 @@ async function poll() {
         state.items[id] = { id, repo: repo.full_name, runId: run.id, title: run.title, sha: run.commit_sha, branch: run.prettyref || 'main',
           runUrl: run.html_url, build: run.status, created: Date.parse(run.stopped || run.updated) || Date.now(), status: run.status === 'success' ? 'queued' : 'failed' };
         save();
-        if (run.status === 'success') await review(state.items[id]);
+        if (run.status === 'success') {
+          for (const o of Object.values(state.items)) if (o.repo === repo.full_name && o.id !== id && ['pending', 'error', 'queued'].includes(o.status) && o.created <= state.items[id].created) o.status = 'superseded';
+          review(state.items[id]);
+        }
       }
     }
   } catch (e) { log('poll', e.message); }
