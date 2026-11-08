@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Selfhost Control Center</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%231e293b'/><path d='M7 20h4l3-8 4 12 3-6h4' stroke='%2360a5fa' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<style>
+/* Homepage-like "dark / slate" theme */
+:root {
+  --bg: #1e293b; --bg-deep: #172033; --card: rgba(255,255,255,.05); --card-hover: rgba(255,255,255,.08);
+  --box: rgba(15,23,42,.35); --line: rgba(148,163,184,.14); --line-2: rgba(148,163,184,.24);
+  --text: #e2e8f0; --muted: #94a3b8; --faint: #64748b;
+  --cpu: #60a5fa; --mem: #a78bfa; --disk: #fbbf24; --rx: #34d399; --tx: #38bdf8;
+  --ok: #34d399; --warn: #fbbf24; --bad: #f87171; --info: #60a5fa;
+  /* Dozzle-like log pane */
+  --log-bg: #0f1522; --log-side: #131b2b;
+  font-family: Manrope, Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-feature-settings: "tnum" 1;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); scroll-behavior: smooth; }
+body { margin: 0; color: var(--text); font-size: 14px; line-height: 1.45;
+  background: radial-gradient(1200px 600px at 10% -10%, rgba(96,165,250,.08), transparent 60%), var(--bg); min-height: 100vh; }
+a { color: inherit; text-decoration: none; }
+.wrap { max-width: 1600px; margin: 0 auto; padding: 22px clamp(16px, 2.5vw, 36px) 48px; }
+.mono { font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+.muted { color: var(--muted); } .faint { color: var(--faint); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; display: inline-block; }
+.dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); } .dot.warn { background: var(--warn); } .dot.info { background: var(--info); }
+.dot.pulse { box-shadow: 0 0 0 0 rgba(52,211,153,.5); animation: pulse 2s infinite; }
+@keyframes pulse { 70% { box-shadow: 0 0 0 7px rgba(52,211,153,0); } 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); } }
+
+/* ---------- information widgets (Homepage header) */
+.info { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 28px; padding-bottom: 18px; margin-bottom: 22px; border-bottom: 1px solid var(--line); }
+.greeting { font-size: 24px; font-weight: 600; letter-spacing: -.01em; margin-right: auto; display: flex; align-items: center; gap: 10px; }
+.res { display: flex; gap: 18px; flex-wrap: wrap; }
+.res-node { display: flex; gap: 14px; align-items: center; }
+.res-node > .nm { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); writing-mode: vertical-rl; transform: rotate(180deg); }
+.res-item { display: grid; grid-template-columns: 16px auto; column-gap: 7px; align-items: center; min-width: 74px; }
+.res-item svg { width: 16px; height: 16px; color: var(--muted); grid-row: span 2; }
+.res-item .v { font-size: 13px; font-weight: 600; line-height: 1.1; }
+.res-item .l { font-size: 11px; color: var(--muted); line-height: 1.1; }
+.res-item .thin { grid-column: 1 / -1; height: 3px; border-radius: 3px; background: var(--line); margin-top: 5px; overflow: hidden; }
+.res-item .thin i { display: block; height: 100%; }
+.search { flex: 1 1 220px; max-width: 360px; }
+.search input { width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); font: inherit; outline: none; }
+.search input:focus { border-color: var(--line-2); background: var(--card-hover); }
+.clock { text-align: right; }
+.clock .t { font-size: 20px; font-weight: 600; } .clock .d { font-size: 12px; color: var(--muted); }
+.nav { display: flex; gap: 8px; }
+.nav a { padding: 7px 12px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); font-size: 13px; color: var(--muted); white-space: nowrap; }
+.nav a:hover { color: var(--text); background: var(--card-hover); }
+.alert { display: none; margin: -8px 0 18px; padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(248,113,113,.35); background: rgba(248,113,113,.08); color: var(--bad); font-size: 13px; }
+.alert.warn { border-color: rgba(251,191,36,.35); background: rgba(251,191,36,.07); color: var(--warn); }
+
+/* ---------- service groups (Homepage cards) */
+.group { margin-bottom: 26px; }
+.group > h2 { font-size: 17px; font-weight: 500; margin: 0 0 10px 2px; color: var(--text); display: flex; align-items: baseline; gap: 10px; }
+.group > h2 small { font-size: 12px; color: var(--faint); font-weight: 400; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+.card { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 8px; background: var(--card); box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: background .15s; min-width: 0; }
+a.card:hover, .card.link:hover { background: var(--card-hover); }
+.card.wide { grid-column: span 2; }
+.card.down { box-shadow: inset 0 0 0 1px rgba(248,113,113,.45); }
+.card-top { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.icon { width: 34px; height: 34px; flex: none; display: grid; place-items: center; font-weight: 700; color: var(--muted); font-size: 15px; border-radius: 8px; background: var(--box); }
+.icon img { width: 30px; height: 30px; object-fit: contain; }
+.card-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-desc { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card .status { position: absolute; top: 10px; right: 10px; display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--faint); }
+.boxes { display: flex; gap: 4px; }
+.box { flex: 1; min-width: 0; padding: 4px 2px; border-radius: 5px; background: var(--box); text-align: center; }
+.box .v { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.box .l { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.box.err .v { color: var(--bad); } .box.warn .v { color: var(--warn); }
+.spark { width: 100%; height: 46px; display: block; }
+.sparks { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sparks .cap { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+.sparks .cap b { color: var(--text); font-weight: 600; }
+.ifaces { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: var(--muted); }
+.ifaces b { color: var(--text); font-weight: 600; }
+.offline-note { font-size: 12.5px; color: var(--muted); padding: 10px; border-radius: 6px; background: var(--box); }
+.bar { height: 5px; border-radius: 5px; background: var(--line); overflow: hidden; } .bar i { display: block; height: 100%; transition: width .6s; }
+.row-top { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; margin-bottom: 5px; }
+.tag { font-size: 10.5px; color: var(--faint); border: 1px solid var(--line-2); border-radius: 5px; padding: 0 5px; margin-left: 6px; }
+.bm { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; background: var(--card); }
+.bm:hover { background: var(--card-hover); }
+.bm .abbr { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 6px; background: var(--box); font-weight: 700; font-size: 12px; color: var(--muted); }
+/* server hardware (iRMC) */
+.hw-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.hw-btns button { flex: 1 1 auto; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--box); color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; }
+.hw-btns button:hover { background: var(--card-hover); }
+.hw-btns button.go { border-color: rgba(52,211,153,.5); color: var(--ok); } .hw-btns button.stop { border-color: rgba(248,113,113,.45); color: var(--bad); }
+.hw-btns button:disabled { opacity: .5; cursor: wait; }
+.hw-sens { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: var(--muted); } .hw-sens b { color: var(--text); font-weight: 600; }
+@media (max-width: 720px) { .card.wide { grid-column: span 1; } .sparks { grid-template-columns: 1fr; } .clock { text-align: left; } .res-node > .nm { writing-mode: horizontal-tb; transform: none; } }
+
+/* ---------- Dozzle-style log viewer */
+.logs { display: grid; grid-template-columns: 250px minmax(0, 1fr); height: min(78vh, 820px); border-radius: 10px; overflow: hidden; background: var(--log-bg); border: 1px solid var(--line); }
+.side { background: var(--log-side); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.side .head { padding: 12px; border-bottom: 1px solid var(--line); }
+.side .head .brand { font-weight: 600; font-size: 13px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+.side input { width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--log-bg); color: var(--text); font: inherit; font-size: 12.5px; outline: none; }
+.clist { overflow-y: auto; padding: 6px; flex: 1; }
+.clist .sec { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); padding: 10px 8px 4px; }
+.citem { display: flex; align-items: center; gap: 9px; padding: 7px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--muted); border: 0; background: none; width: 100%; text-align: left; font-family: inherit; }
+.citem:hover { background: rgba(255,255,255,.04); color: var(--text); }
+.citem.sel { background: rgba(96,165,250,.14); color: var(--text); }
+.citem .nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.citem .n { font-size: 11px; color: var(--faint); font-family: ui-monospace, Menlo, monospace; }
+.citem .n.e { color: var(--bad); }
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.mhead { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; }
+.mhead .title { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 9px; }
+.mhead .sub { font-size: 12px; color: var(--faint); }
+.mstats { display: flex; gap: 16px; margin-left: auto; }
+.mstat { width: 128px; } .mstat .cap { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; } .mstat .cap b { color: var(--text); }
+.mstat .spark { height: 26px; }
+.tools { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--line); align-items: center; font-size: 12.5px; }
+.tools input[type=search] { flex: 1 1 180px; max-width: 320px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--log-side); color: var(--text); font: inherit; outline: none; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; background: none; color: var(--muted); padding: 5px 10px; font: inherit; cursor: pointer; }
+.seg button.on { background: rgba(96,165,250,.16); color: var(--text); }
+.tbtn { border: 1px solid var(--line); background: none; color: var(--muted); padding: 5px 10px; border-radius: 6px; font: inherit; cursor: pointer; }
+.tbtn:hover { color: var(--text); } .tbtn.on { color: var(--ok); border-color: rgba(52,211,153,.4); }
+.lines { flex: 1; overflow-y: auto; padding: 8px 0; font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.55; }
+.ln { display: grid; grid-template-columns: 74px 38px minmax(0, 1fr); gap: 10px; padding: 1px 16px; }
+.ln:hover { background: rgba(255,255,255,.03); }
+.ln time { color: var(--faint); }
+.ln .lv { font-size: 10.5px; font-weight: 700; text-align: center; border-radius: 4px; align-self: start; margin-top: 2px; line-height: 16px; }
+.ln .m { white-space: pre-wrap; word-break: break-word; color: #cbd5e1; }
+.lv-error .lv { background: rgba(248,113,113,.18); color: var(--bad); } .lv-error .m { color: #fecaca; }
+.lv-warn .lv { background: rgba(251,191,36,.16); color: var(--warn); }
+.lv-info .lv { color: var(--faint); }
+.lv-debug .lv { color: #475569; } .lv-debug .m { color: var(--faint); }
+.ln.hide { display: none; }
+.ln .src { color: var(--info); font-weight: 600; }
+mark { background: rgba(251,191,36,.35); color: inherit; border-radius: 2px; }
+.lstate { padding: 20px 16px; color: var(--faint); font-family: inherit; font-size: 13px; }
+.csel { display: none; }
+@media (max-width: 820px) {
+  .logs { grid-template-columns: 1fr; height: 80vh; }
+  .side { display: none; } .csel { display: block; width: 100%; padding: 8px; background: var(--log-side); color: var(--text); border: 0; border-bottom: 1px solid var(--line); font: inherit; }
+  .mstats { margin-left: 0; } .ln { grid-template-columns: 62px minmax(0,1fr); } .ln .lv { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="info">
+    <div class="greeting"><span class="dot pulse ok" id="live"></span>Selfhost Control Center</div>
+    <div class="res" id="res"></div>
+    <form class="search" action="https://duckduckgo.com/" target="_blank"><input name="q" placeholder="Search DuckDuckGo…" autocomplete="off"></form>
+    <nav class="nav"><a href="#logs">Logs</a><a href="/strom">Strom</a><a href="/tv">TV mode ↗</a></nav>
+    <div class="clock"><div class="t" id="time"></div><div class="d" id="date"></div></div>
+  </header>
+  <div class="alert" id="alert"></div>
+
+  <div id="groups"></div>
+
+  <section class="group">
+    <h2>Storage <small id="stor-sum"></small></h2>
+    <div class="cards" id="storage"></div>
+  </section>
+  <section class="group">
+    <h2>Guests <small id="guest-sum"></small></h2>
+    <div class="cards" id="guests"></div>
+  </section>
+
+  <section class="group" id="logs">
+    <h2>Logs <small>live container output · warnings & errors</small></h2>
+    <div class="logs">
+      <aside class="side">
+        <div class="head"><div class="brand"><span>Containers</span><a class="faint" id="dz-link" target="_blank" rel="noopener" style="font-size:11.5px">Dozzle ↗</a></div>
+          <input type="search" id="cfilter" placeholder="Filter containers…"></div>
+        <div class="clist" id="clist"></div>
+      </aside>
+      <div class="main">
+        <select class="csel" id="csel"></select>
+        <div class="mhead" id="mhead"></div>
+        <div class="tools">
+          <input type="search" id="q" placeholder="Search logs…">
+          <span class="seg" id="lvl"><button data-l="all" class="on">All</button><button data-l="warn">Warn+</button><button data-l="error">Errors</button></span>
+          <button class="tbtn on" id="follow">● Follow</button>
+          <button class="tbtn" id="clear">Clear</button>
+          <span class="faint" id="lcount" style="margin-left:auto"></span>
+        </div>
+        <div class="lines" id="lines"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="group">
+    <h2>Bookmarks</h2>
+    <div class="cards" id="bookmarks"></div>
+  </section>
+</div>
+
+<script src="/common.js"></script>
+<script>
+const ICONS = {
+  cpu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>',
+  mem: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="2"/><path d="M6 17v3M10 17v3M14 17v3M18 17v3M7 10v4M12 10v4M17 10v4"/></svg>',
+  disk: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>',
+};
+let S = null;
+// Icons are created once and moved into place, so re-rendering cards every 2s never re-loads/flickers them.
+const iconCache = {};
+const iconSlot = (icon, name) => `<span data-icon="${esc(icon)}" data-name="${esc(name)}"></span>`;
+function fillIcons(root) {
+  root.querySelectorAll('[data-icon]').forEach(sl => {
+    const k = sl.dataset.icon + '|' + sl.dataset.name;
+    let el = iconCache[k];
+    if (!el || el.isConnected) { const t = document.createElement('template'); t.innerHTML = iconHtml(sl.dataset.icon, sl.dataset.name); el = t.content.firstElementChild; if (!iconCache[k]) iconCache[k] = el; }
+    sl.replaceWith(el);
+  });
+}
+
+// ---------- clock
+function clock() {
+  const d = new Date();
+  $('time').textContent = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+  $('date').textContent = d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+}
+clock(); setInterval(clock, 1000);
+
+// ---------- overview rendering
+function resItem(icon, v, l, p, color) {
+  return `<div class="res-item">${ICONS[icon]}<span class="v">${v}</span><span class="l">${l}</span><span class="thin"><i style="width:${Math.min(100, p)}%;background:${hot(p) || color}"></i></span></div>`;
+}
+function box(v, l, cls = '') { return `<div class="box ${cls}"><div class="v">${v}</div><div class="l">${l}</div></div>`; }
+
+function nodeCard(sv, s) {
+  const n = s.nodes[sv.pveNode];
+  const st = serviceStatus(sv, s);
+  const head = `<div class="card-top">${iconSlot(sv.icon, sv.name)}<div style="min-width:0"><div class="card-name">${esc(sv.name)}</div><div class="card-desc">${esc(sv.desc)}</div></div></div>
+    <div class="status"><span class="dot ${st}"></span>${st === 'ok' ? (n?.live ? 'up ' + dur(n.live.uptime) : 'online') : 'offline'}</div>`;
+  if (!n?.online || !n.live) {
+    const pn = primary(s)?.slow?.nodes?.find(x => x.node === sv.pveNode);
+    const note = pn?.status === 'online' ? 'Online, but the stats agent is not installed yet – it is deployed automatically within 5 minutes.'
+      : `Node is offline${n?.lastSeen ? ' · last seen ' + ago(n.lastSeen) : ''}. Stats appear automatically when it is back.`;
+    return `<a class="card wide link down" href="${esc(sv.url)}" target="_blank" rel="noopener">${head}<div class="offline-note">${note}</div></a>`;
+  }
+  const l = n.live, h = n.history || [];
+  const cpu = l.cpu * 100, mem = pct(l.mem.used, l.mem.total), root = pct(l.rootfs.used, l.rootfs.total);
+  const nets = Object.entries(l.net || {});
+  const rx = nets.filter(([k]) => k !== 'tailscale0').reduce((a, [, v]) => a + v.rx, 0);
+  const tx = nets.filter(([k]) => k !== 'tailscale0').reduce((a, [, v]) => a + v.tx, 0);
+  const io = Object.values(l.disk || {}).reduce((a, v) => ({ r: a.r + v.read, w: a.w + v.write }), { r: 0, w: 0 });
+  const smart = (n.slow?.disks || []).map(d => `${d.devpath.replace('/dev/', '')} <b style="color:${/PASSED|OK/.test(d.health) ? 'var(--ok)' : /FAIL/i.test(d.health) ? 'var(--bad)' : 'var(--faint)'}">${esc(d.health)}</b>`).join(' · ');
+  return `<a class="card wide link" href="${esc(sv.url)}" target="_blank" rel="noopener">${head}
+    <div class="boxes">${box(cpu.toFixed(0) + '%', 'CPU')}${box(mem.toFixed(0) + '%', 'RAM')}${box(root.toFixed(0) + '%', 'Root')}${box('↓' + bits(rx).replace(' ', ''), 'Net in')}${box('↑' + bits(tx).replace(' ', ''), 'Net out')}${box(l.load[0].toFixed(2), 'Load')}</div>
+    <div class="sparks">
+      <div><div class="cap"><span>CPU · 1h</span><b>${cpu.toFixed(1)}%</b></div>${spark([h.map(p => p.cpu * 100)], { max: 100, colors: [cssVar('--cpu')] })}</div>
+      <div><div class="cap"><span>RAM · ${bytes(l.mem.total)}</span><b>${bytes(l.mem.used)}</b></div>${spark([h.map(p => p.mem)], { max: l.mem.total, colors: [cssVar('--mem')] })}</div>
+      <div><div class="cap"><span>Network · 1h</span><b><span style="color:var(--rx)">↓${bits(rx)}</span> <span style="color:var(--tx)">↑${bits(tx)}</span></b></div>${spark([h.map(p => p.rx), h.map(p => p.tx)], { colors: [cssVar('--rx'), cssVar('--tx')] })}</div>
+      <div><div class="cap"><span>Disk IO · 1h</span><b>R ${bps(io.r)} · W ${bps(io.w)}</b></div>${spark([h.map(p => p.dw), h.map(p => p.dr)], { colors: [cssVar('--disk'), cssVar('--muted')] })}</div>
+    </div>
+    <div class="ifaces">${nets.map(([k, v]) => `<span title="${esc(k)} ${esc(v.addr || '')}"><span class="dot ${(v.state || 'up') === 'up' ? 'ok' : 'bad'}" style="width:6px;height:6px;vertical-align:1px"></span> ${esc(ifaceLabel(k, v.addr) === k && k !== 'tailscale0' ? (v.usb ? 'USB-LAN' : 'LAN') + ' ' + k : ifaceLabel(k, v.addr))}${v.speed ? ` <span class="faint">${v.speed >= 1000 ? v.speed / 1000 + 'G' : v.speed + 'M'}</span>` : (v.state && v.state !== 'up' ? ' <span style="color:var(--bad)">kein Link</span>' : '')} <b>↓${bits(v.rx)}</b> ↑${bits(v.tx)}</span>`).join('')}${smart ? `<span>SMART ${smart}</span>` : ''}<span>Swap <b>${bytes(l.swap.used)}</b>/${bytes(l.swap.total)}</span></div></a>`;
+}
+
+// server hardware via iRMC/IPMI (power state, watts, temps, fans) + power buttons
+function hwCard(s) {
+  const b = s.bmc; if (!b) return '';
+  const S = n => b.sensors.find(x => x.name === n);
+  const v = x => x && x.value != null ? x.value + ' ' + x.unit : '–';
+  const st = !b.online ? '' : b.power === 'on' ? 'ok' : 'bad';
+  const lbl = !b.online ? 'iRMC nicht erreichbar' : b.power === 'on' ? 'eingeschaltet' : b.power === 'off' ? 'ausgeschaltet' : 'unbekannt';
+  const temps = b.sensors.filter(x => x.unit === '°C' && x.value != null), fans = b.sensors.filter(x => x.unit === 'RPM' && x.value != null);
+  const btns = !b.online ? '' : b.power === 'off'
+    ? `<button class="go" onclick="bmcPower('on','Einschalten')">⚡ Einschalten</button>`
+    : `<button onclick="bmcPower('soft','Herunterfahren')">⏻ Herunterfahren</button><button onclick="bmcPower('reset','Reset (harter Neustart)')">🔄 Reset</button><button class="stop" onclick="bmcPower('off','Hart ausschalten')">⛔ Hart aus</button>`;
+  return `<div class="card wide"><div class="card-top"><span class="icon">🖥</span><div style="min-width:0"><div class="card-name">Server-Hardware ${esc(b.node)}</div><div class="card-desc">${esc(b.name)} · ${esc(b.host)}</div></div></div>
+    <div class="status"><span class="dot ${st}"></span>${lbl}</div>
+    ${b.online ? `<div class="boxes">${box(v(S('Total Power')), 'Gesamt')}${box(v(S('PSU1 Power')), 'PSU 1')}${box(v(S('PSU2 Power')), 'PSU 2')}${box(v(S('Ambient')), 'Raum')}${box(v(S('Systemboard')), 'Board')}</div>
+    <div class="hw-sens">${temps.filter(x => !['Ambient', 'Systemboard'].includes(x.name)).map(x => `<span>${esc(x.name)} <b>${x.value}°C</b></span>`).join('')}${fans.map(x => `<span>${esc(x.name)} <b>${x.value}</b> rpm</span>`).join('')}</div>
+    <div class="hw-btns">${btns}</div>` : `<div class="offline-note">${esc(b.error || 'keine Verbindung zum iRMC')}</div>`}</div>`;
+}
+async function bmcPower(op, label) {
+  const node = S?.bmc?.node; if (!node) return;
+  if (!confirm(`Server ${node}: ${label}?`)) return;
+  if (prompt(`Zur Sicherheit den Servernamen eintippen („${node}“):`) !== node) { alert('Abgebrochen – Name stimmt nicht.'); return; }
+  document.querySelectorAll('.hw-btns button').forEach(b => b.disabled = true);
+  try {
+    const r = await fetch('/api/bmc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op, confirm: node }) }).then(r => r.json());
+    alert(r.ok ? `✓ ${label} gesendet. Status aktualisiert sich gleich.` : 'Fehler: ' + r.error);
+  } catch (e) { alert('Fehler: ' + e.message); }
+}
+
+function serviceCard(sv, s) {
+  const st = serviceStatus(sv, s);
+  const c = s.containers.find(c => c.key === sv.container);
+  const k = s.kuma[sv.kuma];
+  const label = { ok: 'up', bad: 'down', warn: 'pending', info: 'maint.', unknown: '' }[st];
+  const boxes = c && c.state === 'running' ? box(c.stats ? (c.stats.cpu * 100).toFixed(1) + '%' : '–', 'CPU') + box(c.stats ? bytes(c.stats.mem) : '–', 'RAM') +
+    (c.logs ? (c.logs.errors ? box(c.logs.errors, 'Errors', 'err') : c.logs.warnings ? box(c.logs.warnings, 'Warn', 'warn') : box('✓', 'Logs')) : '')
+    : c ? box(esc(c.state), 'State', 'err') : '';
+  const tag = sv.url ? 'a' : 'div';
+  return `<${tag} class="card ${sv.url ? 'link' : ''} ${st === 'bad' ? 'down' : ''}" ${sv.url ? `href="${esc(sv.url)}"` : ''} ${sv.self || !sv.url ? '' : 'target="_blank" rel="noopener"'} title="${k ? 'Uptime Kuma: ' + label : ''}${sv.auto ? ' · automatically discovered' : ''}">
+    <div class="card-top">${iconSlot(sv.icon, sv.name)}<div style="min-width:0;padding-right:44px"><div class="card-name">${esc(sv.name)}</div><div class="card-desc">${esc(sv.desc)}</div></div></div>
+    <div class="status"><span class="dot ${st === 'unknown' ? '' : st}"></span>${label}</div>
+    ${boxes ? `<div class="boxes">${boxes}</div>` : ''}</${tag}>`;
+}
+
+function render(s, err) {
+  if (err) { $('alert').style.display = 'block'; $('alert').className = 'alert'; $('alert').textContent = err; $('live').className = 'dot bad'; return; }
+  S = s;
+  const p = primary(s);
+  $('live').className = 'dot pulse ' + (p ? 'ok' : 'bad');
+
+  // header resources (Homepage "resources" widget, one per node)
+  patch($('res'), Object.values(s.nodes).map(n => n.online && n.live ? `<div class="res-node"><span class="nm">${esc(n.name)}</span>
+      ${resItem('cpu', (n.live.cpu * 100).toFixed(0) + '%', 'CPU', n.live.cpu * 100, cssVar('--cpu'))}
+      ${resItem('mem', bytes(n.live.mem.used, 1), 'RAM', pct(n.live.mem.used, n.live.mem.total), cssVar('--mem'))}
+      ${resItem('disk', pct(n.live.rootfs.used, n.live.rootfs.total).toFixed(0) + '%', 'Root', pct(n.live.rootfs.used, n.live.rootfs.total), cssVar('--disk'))}</div>`
+    : `<div class="res-node"><span class="nm">${esc(n.name)}</span><span class="faint" style="font-size:12px"><span class="dot bad"></span> offline</span></div>`).join(''));
+
+  // alerts: quorum + backend errors
+  const cluster = p?.slow?.quorum?.find(x => x.type === 'cluster');
+  const errs = Object.entries(s.errors).filter(([, v]) => v);
+  const msgs = [];
+  if (cluster && !cluster.quorate) msgs.push('⚠ Cluster has no quorum – Proxmox config is read-only (VMs cannot be started or changed) until all nodes are back.');
+  errs.forEach(([k, v]) => msgs.push(`${k}: ${v}`));
+  $('alert').style.display = msgs.length ? 'block' : 'none';
+  $('alert').className = 'alert' + (errs.length ? '' : ' warn');
+  patch($('alert'), msgs.map(esc).join('<br>'));
+
+  // service groups
+  const groups = [...new Set(s.services.map(x => x.group))];
+  patch($('groups'), groups.map(g => {
+    const items = s.services.filter(x => x.group === g);
+    const up = items.filter(x => serviceStatus(x, s) === 'ok').length;
+    return `<section class="group"><h2>${esc(g)} <small>${up}/${items.length} up</small></h2><div class="cards">${items.map(sv => sv.pveNode ? nodeCard(sv, s) + (s.bmc?.node === sv.pveNode ? hwCard(s) : '') : serviceCard(sv, s)).join('')}</div></section>`;
+  }).join(''));
+  fillIcons($('groups'));
+
+  // storage (from the primary node's view)
+  const stor = (p?.slow?.storage || []).filter(x => x.active).sort((a, b) => b.total - a.total);
+  const inactive = (p?.slow?.storage || []).filter(x => !x.active).map(x => x.storage);
+  patch($('stor-sum'), inactive.length ? `inactive: ${inactive.map(esc).join(', ')}` : '');
+  patch($('storage'), stor.map(x => {
+    const pp = pct(x.used, x.total);
+    return `<div class="card"><div class="row-top"><span><b>${esc(x.storage)}</b><span class="tag">${esc(x.type)}</span></span><span class="muted">${pp.toFixed(0)}%</span></div>
+      <div class="bar"><i style="width:${pp}%;background:${hot(pp) || cssVar('--disk')}"></i></div><div class="card-desc">${bytes(x.used)} of ${bytes(x.total)} · ${bytes(x.avail)} free</div></div>`;
+  }).join('') || '<div class="faint">No data</div>');
+
+  // guests on all nodes
+  const gs = (p?.slow?.guests || []).slice().sort((a, b) => a.node.localeCompare(b.node) || a.vmid - b.vmid);
+  patch($('guest-sum'), `${gs.filter(g => g.status === 'running').length}/${gs.length} running`);
+  patch($('guests'), gs.map(g => {
+    const on = g.status === 'running';
+    return `<div class="card"><div class="row-top" style="margin:0"><span><span class="dot ${on ? 'ok' : g.status === 'unknown' ? '' : 'bad'}"></span> <b>${esc(g.name || (g.type === 'lxc' ? 'CT ' : 'VM ') + g.vmid)}</b><span class="tag">${g.type === 'lxc' ? 'LXC' : 'VM'} ${g.vmid}</span></span><span class="faint">${esc(g.node)}</span></div>
+      <div class="card-desc">${on ? `CPU ${(g.cpu * 100).toFixed(1)}% · RAM ${bytes(g.mem)} / ${bytes(g.maxmem, 0)} · up ${dur(g.uptime)}` : g.status === 'unknown' ? 'node offline' : esc(g.status)}</div></div>`;
+  }).join(''));
+
+  // bookmarks
+  patch($('bookmarks'), s.bookmarks.flatMap(g => g.items.map(b => `<a class="bm" href="${esc(b.url)}" target="_blank" rel="noopener"><span class="abbr">${esc(b.abbr)}</span><span><div class="card-name">${esc(b.name)}</div><div class="card-desc">${esc(g.group)}</div></span></a>`)).join(''));
+
+  renderLogSide(s);
+}
+
+// ---------- Dozzle-style log viewer
+const LV = { error: 'ERR', warn: 'WRN', info: 'INF', debug: 'DBG' };
+const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+let sel = store.get('logs.sel') || '__issues';
+let es = null, lineCount = 0, follow = true, level = 'all', query = '';
+const MAX_LINES = 3000;
+
+function renderLogSide(s) {
+  $('dz-link').href = s.dozzleUrl;
+  const f = $('cfilter').value.toLowerCase();
+  const cs = s.containers.filter(c => c.name.toLowerCase().includes(f));
+  const issues = s.events.filter(e => !e.noise).length;
+  const item = c => {
+    const st = c.state !== 'running' || c.health === 'unhealthy' ? 'bad' : c.health === 'health: starting' ? 'warn' : 'ok';
+    const n = c.logs?.errors ? `<span class="n e">${c.logs.errors}</span>` : c.stats ? `<span class="n">${(c.stats.cpu * 100).toFixed(1)}%</span>` : '';
+    return `<button class="citem ${sel === c.key ? 'sel' : ''}" data-c="${esc(c.key)}"><span class="dot ${st}"></span><span class="nm">${esc(c.name)}</span>${n}</button>`;
+  };
+  const hosts = [...new Set(s.containers.map(c => c.host))];
+  patch($('clist'), `<button class="citem ${sel === '__issues' ? 'sel' : ''}" data-c="__issues"><span class="dot ${issues ? 'warn' : 'ok'}"></span><span class="nm">All issues</span><span class="n ${issues ? 'e' : ''}">${issues}</span></button>
+    ${hosts.map(h => { const hc = cs.filter(c => c.host === h); return hc.length ? `<div class="sec">${esc(h)} · ${hc.filter(c => c.state === 'running').length}/${hc.length}</div>${hc.map(item).join('')}` : ''; }).join('')}`);
+  patch($('csel'), `<option value="__issues">All issues (${issues})</option>` + s.containers.map(c => `<option value="${esc(c.key)}" ${sel === c.key ? 'selected' : ''}>${esc(c.key)} · ${esc(c.state)}</option>`).join(''));
+  $('csel').value = sel;
+
+  // header for selected container
+  const c = s.containers.find(x => x.key === sel);
+  if (sel === '__issues' || !c) {
+    patch($('mhead'), `<div><div class="title"><span class="dot ${issues ? 'warn' : 'ok'}"></span>All issues</div><div class="sub">Warnings and errors from every container, last hour · refreshed every minute</div></div>`);
+    if (sel === '__issues' || !c) renderIssues(s);
+  } else {
+    const st = c.state !== 'running' ? 'bad' : c.health === 'unhealthy' ? 'bad' : 'ok';
+    const h = c.hist || [];
+    patch($('mhead'), `<div><div class="title"><span class="dot ${st}"></span>${esc(c.name)}</div><div class="sub mono">${esc(c.host)} · ${esc(c.image)} · ${esc(c.status)}</div></div>
+      <div class="mstats">
+        <div class="mstat"><div class="cap"><span>CPU</span><b>${c.stats ? (c.stats.cpu * 100).toFixed(1) + '%' : '–'}</b></div>${spark([h.map(p => p.cpu * 100)], { colors: [cssVar('--cpu')], h: 26 })}</div>
+        <div class="mstat"><div class="cap"><span>MEM</span><b>${c.stats ? bytes(c.stats.mem) : '–'}</b></div>${spark([h.map(p => p.mem)], { colors: [cssVar('--mem')], h: 26 })}</div>
+        ${c.host === 'selfhost' ? `<a class="tbtn" style="align-self:center" href="${esc(s.dozzleUrl)}/container/${esc(c.id)}" target="_blank" rel="noopener">Open in Dozzle ↗</a>` : ''}
+      </div>`);
+  }
+}
+
+function hl(text) {
+  const t = esc(text); if (!query) return t;
+  const q = esc(query).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return t.replace(new RegExp(q, 'gi'), m => `<mark>${m}</mark>`);
+}
+function visible(lv, msg) {
+  if (level === 'warn' && !(lv === 'warn' || lv === 'error')) return false;
+  if (level === 'error' && lv !== 'error') return false;
+  return !query || msg.toLowerCase().includes(query.toLowerCase());
+}
+function lineEl(e, src) {
+  const d = document.createElement('div');
+  d.className = `ln lv-${e.level}` + (visible(e.level, e.msg) ? '' : ' hide');
+  d.dataset.lv = e.level; d._msg = e.msg;
+  const t = new Date(e.ts);
+  d.innerHTML = `<time title="${t.toLocaleString()}">${t.toLocaleTimeString(undefined, { hour12: false })}</time><span class="lv">${LV[e.level]}</span><span class="m">${src ? `<span class="src">${esc(src)}</span> ` : ''}${hl(e.msg)}</span>`;
+  return d;
+}
+function updateCount() {
+  const shown = $('lines').querySelectorAll('.ln:not(.hide)').length;
+  $('lcount').textContent = sel === '__issues' ? `${shown} entries` : `${shown}${shown !== lineCount ? ' / ' + lineCount : ''} lines` + (es && es.readyState === 1 ? ' · live' : '');
+}
+function scrollEnd() { if (follow) { const l = $('lines'); l.scrollTop = l.scrollHeight; } }
+
+let issuesKey = '';
+function renderIssues(s) {
+  const ev = s.events.filter(e => !e.noise);
+  const key = ev.map(e => e.ts + e.container).join() + level + query;
+  if (key === issuesKey) return; issuesKey = key;
+  const l = $('lines'); l.innerHTML = '';
+  if (!ev.length) { l.innerHTML = '<div class="lstate">No warnings or errors in the last hour. 🎉</div>'; updateCount(); return; }
+  ev.slice().reverse().forEach(e => l.appendChild(lineEl(e, e.container)));
+  updateCount(); scrollEnd();
+}
+
+function openStream() {
+  if (es) { es.close(); es = null; }
+  issuesKey = ''; lineCount = 0;
+  const l = $('lines'); l.innerHTML = '';
+  if (sel === '__issues') { if (S) renderIssues(S); return; }
+  const c = S?.containers.find(x => x.key === sel);
+  if (!c) { l.innerHTML = '<div class="lstate">Container not found.</div>'; return; }
+  l.innerHTML = '<div class="lstate">Connecting…</div>';
+  const src = new EventSource(`/api/logs?c=${encodeURIComponent(c.key)}&tail=400`);
+  es = src;
+  let first = true, buf = [], raf = 0;
+  const flush = () => {
+    raf = 0;
+    if (first) { l.innerHTML = ''; first = false; }
+    const frag = document.createDocumentFragment();
+    buf.forEach(e => frag.appendChild(lineEl(e))); lineCount += buf.length; buf = [];
+    l.appendChild(frag);
+    while (l.children.length > MAX_LINES) { l.firstChild.remove(); lineCount--; }
+    updateCount(); scrollEnd();
+  };
+  src.onmessage = m => { buf.push(JSON.parse(m.data)); if (!raf) raf = requestAnimationFrame(flush); };
+  src.onopen = () => setTimeout(() => { if (first) { l.innerHTML = '<div class="lstate">No log output yet – waiting for new lines…</div>'; first = true; } updateCount(); }, 1500);
+  src.addEventListener('end', () => { src.close(); updateCount(); });
+  src.onerror = () => updateCount();
+}
+
+function select(name) {
+  if (name === sel && es) return;
+  sel = name; store.set('logs.sel', name);
+  if (S) renderLogSide(S);
+  openStream();
+}
+$('clist').addEventListener('click', e => { const b = e.target.closest('.citem'); if (b) select(b.dataset.c); });
+$('csel').addEventListener('change', e => select(e.target.value));
+$('cfilter').addEventListener('input', () => S && renderLogSide(S));
+$('lvl').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  level = b.dataset.l; $('lvl').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); refilter();
+});
+let qt; $('q').addEventListener('input', e => { clearTimeout(qt); qt = setTimeout(() => { query = e.target.value.trim(); refilter(); }, 150); });
+function refilter() {
+  $('lines').querySelectorAll('.ln').forEach(d => {
+    d.classList.toggle('hide', !visible(d.dataset.lv, d._msg));
+    const m = d.querySelector('.m'); const src = m.querySelector('.src');
+    m.innerHTML = (src ? src.outerHTML + ' ' : '') + hl(d._msg);
+  });
+  updateCount(); scrollEnd();
+}
+$('follow').addEventListener('click', () => { follow = !follow; $('follow').classList.toggle('on', follow); scrollEnd(); });
+$('clear').addEventListener('click', () => { if (sel !== '__issues') { $('lines').innerHTML = ''; lineCount = 0; updateCount(); } });
+// Like Dozzle: scrolling up pauses follow, scrolling back to the bottom resumes it.
+$('lines').addEventListener('scroll', () => {
+  const l = $('lines'); const atEnd = l.scrollHeight - l.scrollTop - l.clientHeight < 30;
+  if (follow !== atEnd) { follow = atEnd; $('follow').classList.toggle('on', follow); }
+});
+
+let started = false;
+poll((s, err) => { render(s, err); if (s && !started) { started = true; if (sel !== '__issues' && !s.containers.some(c => c.key === sel)) sel = '__issues'; openStream(); } });
+</script>
+</body>
+</html>

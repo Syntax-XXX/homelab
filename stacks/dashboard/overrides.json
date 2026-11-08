@@ -1,0 +1,23 @@
+{
+  "groupOrder": ["Infrastructure", "Media", "Cloud", "Monitoring", "Monitors"],
+  "containers": {
+    "jellyfin":     {"name": "Jellyfin",     "url": "http://jellyfin.local",     "icon": "jellyfin",      "group": "Media", "desc": "Media server"},
+    "seerr":        {"name": "Seerr",        "url": "http://seerr.local",        "icon": "jellyseerr",    "group": "Media", "desc": "Requests"},
+    "sonarr":       {"name": "Sonarr",       "url": "http://sonarr.local",       "icon": "sonarr",        "group": "Media", "desc": "Series"},
+    "radarr":       {"name": "Radarr",       "url": "http://radarr.local",       "icon": "radarr",        "group": "Media", "desc": "Movies"},
+    "prowlarr":     {"name": "Prowlarr",     "url": "http://prowlarr.local",     "icon": "prowlarr",      "group": "Media", "desc": "Indexers"},
+    "bazarr":       {"name": "Bazarr",       "url": "http://bazarr.local",       "icon": "bazarr",        "group": "Media", "desc": "Subtitles"},
+    "qbittorrent":  {"name": "qBittorrent",  "url": "http://qbittorrent.local",  "icon": "qbittorrent",   "group": "Media", "desc": "Downloads"},
+    "mediathekarr": {"name": "MediathekArr", "url": "http://mediathekarr.local", "icon": "ard-mediathek", "group": "Media", "desc": "ARD/ZDF Mediathek"},
+    "uptime-kuma":  {"name": "Uptime Kuma",  "url": "http://uptime.local",       "icon": "uptime-kuma",   "group": "Monitoring", "desc": "Service monitoring"},
+    "dozzle":       {"name": "Dozzle",       "url": "http://dozzle.local",       "icon": "dozzle",        "group": "Monitoring", "desc": "Container logs"},
+    "cloud/nextcloud": {"name": "Nextcloud",     "url": "http://nextcloud.local",          "icon": "nextcloud",     "group": "Cloud", "desc": "Files & school stuff", "kuma": "nextcloud-web"},
+    "cloud/paperless": {"name": "Paperless-ngx", "url": "http://paperless.local",          "icon": "paperless-ngx", "group": "Cloud", "desc": "Documents with OCR",   "kuma": "paperless-web"},
+    "cloud/guacamole": {"name": "Guacamole",     "url": "http://guacamole.local",          "icon": "guacamole",     "group": "Cloud", "desc": "Remote desktop & SSH", "kuma": "guacamole-web"},
+    "cloud/couchdb":   {"name": "Obsidian Sync", "url": "http://obsidian.local/_utils/",   "icon": "obsidian",      "group": "Cloud", "desc": "LiveSync server",      "kuma": "obsidian-sync"},
+    "postgres": {"hide": true}, "redis": {"hide": true}, "guacd": {"hide": true}, "caddy": {"hide": true}, "dashboard": {"hide": true}
+  },
+  "links": [
+    {"group": "Monitoring", "name": "TV mode", "url": "/tv", "icon": "grafana", "desc": "Fullscreen wall view", "self": true, "container": "selfhost/dashboard", "kuma": "dashboard"}
+  ]
+}

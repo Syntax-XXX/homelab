@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Selfhost TV</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23090d14'/><path d='M7 20h4l3-8 4 12 3-6h4' stroke='%2334d399' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<style>
+:root {
+  --bg: #070a10; --panel: #0e131c; --panel-2: #131a26; --line: #1c2533; --text: #e8edf5; --muted: #8592a8; --faint: #4f5b70;
+  --cpu: #60a5fa; --mem: #a78bfa; --disk: #fbbf24; --rx: #34d399; --tx: #38bdf8; --nas: #f472b6;
+  --ok: #34d399; --warn: #fbbf24; --bad: #f87171; --info: #60a5fa; --off: #64748b;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-feature-settings: "tnum" 1;
+  /* scale everything from the viewport: ~20px on 1920x1080 */
+  font-size: min(1.04vw, 1.85vh);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
+body { cursor: none; } body.cursor { cursor: default; }
+#root { height: 100vh; padding: 1.1rem 1.4rem .9rem; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: .9rem; transition: transform 2s ease; }
+.mono { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
+.muted { color: var(--muted); } .faint { color: var(--faint); }
+.dot { width: .62rem; height: .62rem; border-radius: 50%; background: var(--faint); display: inline-block; flex: none; }
+.dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); } .dot.warn { background: var(--warn); } .dot.info { background: var(--info); } .dot.off { background: var(--off); }
+.c-ok { color: var(--ok); } .c-bad { color: var(--bad); } .c-warn { color: var(--warn); } .c-off { color: var(--off); }
+
+/* ---------- header (same on every page) */
+header { display: flex; align-items: center; gap: 1.4rem; }
+.brand { font-size: 1.55rem; font-weight: 700; letter-spacing: -.02em; }
+.overall { display: flex; align-items: center; gap: .65rem; padding: .5rem 1.05rem; border-radius: 99rem; font-size: 1.1rem; font-weight: 600; white-space: nowrap; }
+.overall.ok { background: rgba(52,211,153,.1); color: var(--ok); } .overall.bad { background: rgba(248,113,113,.12); color: var(--bad); } .overall.warn { background: rgba(251,191,36,.1); color: var(--warn); }
+.overall .dot { width: .78rem; height: .78rem; background: currentColor; animation: pulse 2.4s infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+.tabs { display: flex; gap: .4rem; margin-left: .4rem; }
+.tab { padding: .45rem .95rem; border-radius: .65rem; font-size: 1rem; color: var(--faint); background: transparent; font-weight: 600; white-space: nowrap; position: relative; overflow: hidden; }
+.tab.on { color: var(--text); background: var(--panel); }
+.tab .prog { position: absolute; left: 0; bottom: 0; height: .16rem; background: var(--info); width: 0; }
+.tab.on .prog { animation: prog var(--dur, 20s) linear forwards; }
+.paused .tab.on .prog { animation-play-state: paused; }
+@keyframes prog { to { width: 100%; } }
+.clock { margin-left: auto; text-align: right; line-height: 1; white-space: nowrap; }
+.clock .t { font-size: 3.1rem; font-weight: 300; letter-spacing: -.03em; }
+.clock .d { font-size: 1rem; color: var(--muted); margin-top: .3rem; }
+
+/* ---------- pages */
+#pages { position: relative; min-height: 0; }
+.page { position: absolute; inset: 0; display: grid; gap: .9rem; opacity: 0; visibility: hidden; transition: opacity .7s ease, visibility 0s linear .7s; }
+.page.on { opacity: 1; visibility: visible; transition: opacity .7s ease; }
+.panel { background: var(--panel); border-radius: 1rem; padding: .95rem 1.05rem; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.panel h3 { margin: 0 0 .65rem; font-size: .82rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.panel h3 span { text-transform: none; letter-spacing: 0; color: var(--faint); font-weight: 500; }
+.bar { height: .38rem; border-radius: 1rem; background: var(--line); overflow: hidden; } .bar i { display: block; height: 100%; transition: width .8s; }
+.empty { flex: 1; display: grid; place-items: center; color: var(--faint); text-align: center; }
+
+/* ---------- page 1: resources */
+#p-res { grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr) auto; }
+.node { gap: .7rem; }
+.node-head { display: flex; align-items: center; gap: .7rem; }
+.node-head .nm { font-size: 1.4rem; font-weight: 700; }
+.node-head .ip { color: var(--faint); font-size: .95rem; }
+.node-head .meta { color: var(--muted); font-size: .92rem; margin-left: auto; display: flex; gap: 1.1rem; white-space: nowrap; }
+.node-head .meta b { color: var(--text); font-weight: 600; }
+.badge { padding: .2rem .6rem; border-radius: .45rem; font-size: .8rem; font-weight: 700; letter-spacing: .06em; }
+.badge.bad { background: rgba(248,113,113,.15); color: var(--bad); } .badge.warn { background: rgba(251,191,36,.12); color: var(--warn); }
+.metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem; height: 8.6rem; flex: none; }
+.metric { background: var(--panel-2); border-radius: .7rem; padding: .6rem .8rem .45rem; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.metric .lbl { font-size: .76rem; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; display: flex; justify-content: space-between; }
+.metric .val { font-size: 2rem; font-weight: 650; letter-spacing: -.03em; line-height: 1.1; margin-top: .1rem; white-space: nowrap; }
+.metric .val small { font-size: .95rem; color: var(--muted); font-weight: 500; letter-spacing: 0; margin-left: .25rem; }
+.metric svg.spark { flex: 1; width: 100%; min-height: 1.2rem; margin-top: .25rem; }
+.sect { font-size: .74rem; color: var(--faint); text-transform: uppercase; letter-spacing: .1em; font-weight: 600; margin: .15rem 0 -.2rem; }
+.nics { display: grid; grid-template-columns: repeat(auto-fill, minmax(13.5rem, 1fr)); gap: .5rem; flex: none; }
+.nic { background: var(--panel-2); border-radius: .6rem; padding: .5rem .7rem; display: grid; grid-template-columns: auto 1fr auto; gap: .1rem .55rem; align-items: center; font-size: .88rem; border-left: .25rem solid var(--ok); }
+.nic.down { border-left-color: var(--bad); opacity: .75; }
+.nic .n { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nic .sp { color: var(--muted); font-size: .8rem; white-space: nowrap; }
+.nic .sub { grid-column: 2 / 4; color: var(--muted); font-size: .8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nic .tr { grid-column: 1 / 4; font-size: .9rem; white-space: nowrap; } .nic .tr b { font-weight: 600; }
+.stors { display: flex; flex-direction: column; gap: .42rem; min-height: 0; overflow: hidden; }
+.stor { display: grid; grid-template-columns: 8.5rem 4.6rem 1fr 11rem 3.2rem; gap: .7rem; align-items: center; font-size: .92rem; }
+.stor .n { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stor .t { color: var(--faint); font-size: .8rem; }
+.stor .u { color: var(--muted); text-align: right; white-space: nowrap; font-size: .86rem; }
+.stor .p { text-align: right; font-weight: 650; }
+.disks { display: flex; flex-wrap: wrap; gap: .4rem; }
+.pd { background: var(--panel-2); border-radius: .5rem; padding: .3rem .6rem; font-size: .8rem; display: flex; align-items: center; gap: .45rem; white-space: nowrap; }
+.pd b { font-weight: 600; } .pd .h { font-weight: 700; font-size: .72rem; letter-spacing: .05em; }
+.node.off .metrics, .node.off .nics, .node.off .stors, .node.off .disks { opacity: .4; filter: grayscale(.6); }
+.offbar { border-radius: .7rem; padding: .7rem 1rem; display: flex; align-items: center; gap: 1rem; background: repeating-linear-gradient(135deg, rgba(248,113,113,.08) 0 1rem, rgba(248,113,113,.03) 1rem 2rem); }
+.offbar .big { font-size: 1.6rem; font-weight: 800; color: var(--bad); letter-spacing: .12em; }
+.offbar .s { color: var(--muted); font-size: .95rem; }
+.hw { display: flex; flex-wrap: wrap; gap: .4rem; }
+.hw .pd b { color: var(--warn); }
+.nasrow { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: .9rem; }
+.nas { background: var(--panel); border-radius: 1rem; padding: .85rem 1.1rem; display: grid; grid-template-columns: auto 1fr auto; gap: .35rem 1rem; align-items: center; border-left: .3rem solid var(--nas); }
+.nas.bad { border-left-color: var(--bad); }
+.nas .ic { grid-row: span 2; font-size: 1.6rem; width: 2.6rem; height: 2.6rem; border-radius: .7rem; background: rgba(244,114,182,.12); display: grid; place-items: center; }
+.nas .n { font-size: 1.15rem; font-weight: 700; } .nas .n span { color: var(--faint); font-size: .85rem; font-weight: 500; margin-left: .5rem; }
+.nas .p { font-size: 1.5rem; font-weight: 700; text-align: right; grid-row: span 2; }
+.nas .bar { height: .5rem; } .nas .u { grid-column: 2; color: var(--muted); font-size: .88rem; }
+
+/* ---------- page 2: uptime & errors */
+#p-up { grid-template-columns: 1.25fr 1fr; grid-template-rows: auto minmax(0, 1fr); }
+.kpis { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(6, 1fr); gap: .9rem; }
+.kpi { background: var(--panel); border-radius: 1rem; padding: .8rem 1.05rem; }
+.kpi .l { font-size: .78rem; color: var(--muted); text-transform: uppercase; letter-spacing: .09em; }
+.kpi .v { font-size: 2.1rem; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; margin-top: .15rem; white-space: nowrap; }
+.kpi .s { font-size: .85rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mons { display: flex; flex-direction: column; gap: .32rem; min-height: 0; flex: 1; justify-content: space-evenly; }
+.mon { display: grid; grid-template-columns: auto 10.5rem 1fr 4.6rem 4.2rem; gap: .8rem; align-items: center; font-size: .98rem; }
+.mon .n { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.beats { display: flex; gap: .14rem; height: 1.25rem; align-items: stretch; justify-content: flex-end; overflow: hidden; }
+.beats i { flex: 0 0 .36rem; border-radius: .15rem; background: var(--ok); opacity: .85; }
+.beats i.b0 { background: var(--bad); opacity: 1; } .beats i.b2 { background: var(--warn); } .beats i.b3 { background: var(--info); } .beats i.na { background: var(--line); }
+.mon .u { text-align: right; font-weight: 700; } .mon .ms { text-align: right; color: var(--muted); font-size: .86rem; }
+.rcol { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: .9rem; min-height: 0; }
+.errchips { display: flex; flex-wrap: wrap; gap: .45rem; }
+.chip { background: var(--panel-2); border-radius: .55rem; padding: .35rem .7rem; font-size: .9rem; display: flex; gap: .5rem; align-items: center; white-space: nowrap; }
+.chip .e { color: var(--bad); font-weight: 700; } .chip .w { color: var(--warn); font-weight: 700; }
+.issues { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: .55rem; -webkit-mask-image: linear-gradient(#000 85%, transparent); mask-image: linear-gradient(#000 85%, transparent); }
+.iss { display: grid; grid-template-columns: auto 1fr; gap: .15rem .6rem; font-size: .92rem; }
+.iss .dot { margin-top: .4rem; }
+.iss .hd { display: flex; justify-content: space-between; gap: .5rem; } .iss .hd b { font-weight: 600; }
+.iss .m { grid-column: 2; color: var(--muted); font-size: .82rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+.allgood { flex: 1; display: grid; place-items: center; color: var(--ok); font-size: 1.2rem; text-align: center; }
+
+/* ---------- page 3: guests & containers */
+#p-run { grid-template-columns: 1fr 1.65fr; }
+.grp { font-size: .8rem; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .09em; margin: .35rem 0 .45rem; display: flex; align-items: center; gap: .55rem; }
+.grp:first-child { margin-top: 0; }
+.grp .cnt { color: var(--faint); font-weight: 500; letter-spacing: 0; text-transform: none; margin-left: auto; }
+.tiles { display: grid; gap: .5rem; }
+.tiles.g1 { grid-template-columns: 1fr; } .tiles.g3 { grid-template-columns: repeat(3, 1fr); }
+.tile { background: var(--panel-2); border-radius: .65rem; padding: .5rem .75rem; display: grid; grid-template-columns: 1fr auto; gap: .1rem .6rem; align-items: center; border-left: .28rem solid var(--ok); min-width: 0; }
+.tile .n { font-weight: 650; font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .n .id { color: var(--faint); font-weight: 500; font-size: .85rem; margin-right: .35rem; }
+.tile .st { font-size: .78rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+.tile .sub { grid-column: 1 / -1; color: var(--muted); font-size: .8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile.ok .st { color: var(--ok); }
+.tile.bad { border-left-color: var(--bad); background: rgba(248,113,113,.09); } .tile.bad .st { color: var(--bad); }
+.tile.warn { border-left-color: var(--warn); } .tile.warn .st { color: var(--warn); }
+.tile.off { border-left-color: var(--off); background: repeating-linear-gradient(135deg, var(--panel-2) 0 .8rem, #10161f .8rem 1.6rem); } .tile.off .st { color: var(--off); } .tile.off .n { color: var(--muted); }
+.tile.stopped { border-left-color: var(--faint); opacity: .8; } .tile.stopped .st { color: var(--muted); }
+.kind { font-size: .66rem; font-weight: 800; padding: .08rem .35rem; border-radius: .3rem; background: var(--line); color: var(--muted); margin-right: .4rem; vertical-align: .1rem; }
+.legend { display: flex; gap: 1.1rem; font-size: .82rem; color: var(--muted); }
+.legend span { display: flex; align-items: center; gap: .35rem; }
+
+/* ---------- footer */
+footer { display: flex; align-items: center; gap: 1.4rem; font-size: .9rem; color: var(--muted); white-space: nowrap; }
+footer .upd { margin-left: auto; display: flex; align-items: center; gap: .5rem; }
+.conn { position: fixed; inset: 0; display: none; place-items: center; background: rgba(7,10,16,.85); font-size: 1.6rem; color: var(--warn); z-index: 9; }
+</style>
+</head>
+<body>
+<div id="root">
+  <header>
+    <div class="brand">Selfhost</div>
+    <div class="overall ok" id="overall"><span class="dot"></span><span>Verbinde…</span></div>
+    <div class="tabs" id="tabs"></div>
+    <div class="clock"><div class="t" id="time"></div><div class="d" id="date"></div></div>
+  </header>
+  <div id="pages">
+    <section class="page" id="p-res">
+      <div class="panel node" id="node-a"></div>
+      <div class="panel node" id="node-b"></div>
+      <div class="nasrow" id="nas"></div>
+    </section>
+    <section class="page" id="p-up">
+      <div class="kpis" id="kpis"></div>
+      <div class="panel"><h3>Dienste · Uptime 24 h <span id="mon-sum"></span></h3><div class="mons" id="mons"></div></div>
+      <div class="rcol">
+        <div class="panel"><h3>Fehler pro Container <span>letzte Stunde</span></h3><div class="errchips" id="errchips"></div></div>
+        <div class="panel"><h3>Letzte Fehler &amp; Warnungen <span id="iss-sum">letzte Stunde</span></h3><div class="issues" id="issues"></div></div>
+      </div>
+    </section>
+    <section class="page" id="p-run">
+      <div class="panel"><h3>Proxmox · VMs &amp; LXC <span id="g-sum"></span></h3><div id="guests"></div></div>
+      <div class="panel"><h3>Docker · Container <span class="legend"><span><i class="dot ok"></i>läuft</span><span><i class="dot bad"></i>aus / Fehler</span><span><i class="dot warn"></i>startet</span><span><i class="dot off"></i>keine Verbindung</span></span></h3><div id="ctrs"></div></div>
+    </section>
+  </div>
+  <footer id="foot"></footer>
+</div>
+<div class="conn" id="conn">Verbindung zum Dashboard wird wiederhergestellt…</div>
+
+<script src="/common.js"></script>
+<script>
+// ---------- playlist: ?interval=20 (seconds per page), ?page=2 pins one page, arrow keys switch, space pauses
+const PAGES = [{ id: 'p-res', name: 'Ressourcen' }, { id: 'p-up', name: 'Uptime & Fehler' }, { id: 'p-run', name: 'VMs & Container' }];
+const qs = new URLSearchParams(location.search);
+const INTERVAL = Math.max(5, +qs.get('interval') || 20) * 1000;
+const PINNED = qs.has('page') ? Math.min(PAGES.length, Math.max(1, +qs.get('page'))) - 1 : null;
+let cur = PINNED ?? 0, timer = null, paused = PINNED !== null;
+document.documentElement.style.setProperty('--dur', INTERVAL / 1000 + 's');
+$('tabs').innerHTML = PAGES.map((p, i) => `<div class="tab" data-i="${i}">${p.name}<i class="prog"></i></div>`).join('');
+function show(i) {
+  cur = (i + PAGES.length) % PAGES.length;
+  PAGES.forEach((p, k) => $(p.id).classList.toggle('on', k === cur));
+  [...$('tabs').children].forEach((t, k) => { t.classList.toggle('on', k === cur); const pr = t.querySelector('.prog'); pr.style.animation = 'none'; void pr.offsetWidth; pr.style.animation = ''; });
+  clearTimeout(timer);
+  if (!paused) timer = setTimeout(() => show(cur + 1), INTERVAL);
+}
+document.body.classList.toggle('paused', paused);
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight') show(cur + 1); else if (e.key === 'ArrowLeft') show(cur - 1);
+  else if (e.key === ' ') { paused = !paused; document.body.classList.toggle('paused', paused); show(cur); }
+  else if (/^[1-9]$/.test(e.key) && +e.key <= PAGES.length) show(+e.key - 1);
+});
+$('tabs').addEventListener('click', e => { const t = e.target.closest('.tab'); if (t) { e.stopPropagation(); show(+t.dataset.i); } });
+show(cur);
+
+// ---------- clock (always visible)
+function clock() {
+  const d = new Date();
+  $('time').textContent = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  $('date').textContent = d.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+}
+clock(); setInterval(clock, 1000);
+
+// ---------- helpers
+const agoDe = ts => { const s = Math.max(0, (Date.now() - ts) / 1000); return s < 60 ? `vor ${Math.round(s)} s` : s < 3600 ? `vor ${Math.round(s / 60)} min` : s < 86400 ? `vor ${Math.round(s / 3600)} h` : `vor ${Math.round(s / 86400)} T`; };
+const durDe = s => { s = Math.floor(s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return d ? `${d} T ${h} h` : h ? `${h} h ${m} min` : `${m} min`; };
+const bar = (p, c) => `<div class="bar"><i style="width:${Math.min(100, Math.max(0, p))}%;background:${hot(p) || c}"></i></div>`;
+const STYPE = { dir: 'Lokal', lvmthin: 'LVM-Thin', lvm: 'LVM', zfspool: 'ZFS', nfs: 'NFS', cifs: 'SMB', pbs: 'Backup', btrfs: 'Btrfs', cephfs: 'Ceph', rbd: 'Ceph' };
+const speed = s => !s ? '' : s >= 1000 ? `${s / 1000} Gbit/s` : `${s} Mbit/s`;
+const nodeIp = n => { try { return new URL(n.url).hostname; } catch { return ''; } };
+function nicName(k, v) {
+  if (k === 'tailscale0') return 'Tailscale';
+  const lbl = ifaceLabel(k, v.addr?.split('/')[0]);
+  return lbl === k ? (v.usb ? 'USB-LAN' : 'LAN') : lbl;
+}
+
+// ---------- page 1: resources
+function nodeCard(n, s) {
+  const p = primary(s), pn = p?.slow?.nodes?.find(x => x.node === n.name);
+  const online = n.online && n.live;
+  const l = n.live, sl = n.slow, h = n.history || [];
+  if (!l && !sl) {
+    const bb = s.bmc && s.bmc.node === n.name && s.bmc.online ? s.bmc : null;
+    const off = bb?.power === 'off';
+    let h0 = `<div class="node-head"><span class="dot bad"></span><span class="nm">${esc(n.name)}</span><span class="ip">${nodeIp(n)}</span><div class="meta"><span class="badge bad">${off ? 'AUS' : 'OFFLINE'}</span></div></div>
+      <div class="offbar"><div class="big">${off ? 'AUSGESCHALTET' : bb?.power === 'on' ? 'STARTET' : 'OFFLINE'}</div><div class="s">${off ? `laut ${esc(bb.name)} · Werte erscheinen, sobald der Server läuft` : 'Noch keine Daten – Node nicht erreichbar'}</div></div>`;
+    if (bb) { const S = nm => bb.sensors.find(x => x.name === nm), v = x => x && x.value != null ? `${x.value} ${x.unit}` : '–';
+      h0 += `<div class="sect">Hardware · ${esc(bb.name)}</div><div class="hw"><span class="pd">⚡ Gesamt <b>${v(S('Total Power'))}</b></span><span class="pd">PSU 1 <b>${v(S('PSU1 Power'))}</b></span><span class="pd">PSU 2 <b>${v(S('PSU2 Power'))}</b></span><span class="pd">Raum <b>${v(S('Ambient'))}</b></span><span class="pd">Board <b>${v(S('Systemboard'))}</b></span></div>`; }
+    return h0;
+  }
+  const ver = sl?.version?.version ? `PVE ${sl.version.version}` : '';
+  let head = `<div class="node-head"><span class="dot ${online ? 'ok' : 'bad'}"></span><span class="nm">${esc(n.name)}</span><span class="ip">${nodeIp(n)}</span>`;
+  head += online ? `<div class="meta"><span>Up <b>${durDe(l.uptime)}</b></span><span>Load <b>${l.load.map(x => x.toFixed(2)).join(' ')}</b></span>${ver ? `<span>${esc(ver)}</span>` : ''}</div></div>`
+    : `<div class="meta"><span class="badge bad">${s.bmc?.node === n.name && s.bmc.online && s.bmc.power === 'off' ? 'AUS' : 'OFFLINE'}</span></div></div>`;
+  let html = head;
+  const b = s.bmc && s.bmc.node === n.name ? s.bmc : null;
+  const powerOff = b?.online && b.power === 'off';
+  if (!online && powerOff) html += `<div class="offbar"><div class="big">AUSGESCHALTET</div><div class="s">laut ${esc(b.name)} · zuletzt online ${n.lastSeen ? agoDe(n.lastSeen) : 'unbekannt'} · unten letzter bekannter Stand</div></div>`;
+  else if (!online) html += `<div class="offbar"><div class="big">${pn?.status === 'online' ? 'KEIN AGENT' : b?.online && b.power === 'on' ? 'STARTET' : 'OFFLINE'}</div><div class="s">${pn?.status === 'online' ? 'Proxmox läuft, Stats-Agent wird automatisch installiert' : `Nicht erreichbar · zuletzt gesehen ${n.lastSeen ? agoDe(n.lastSeen) : 'unbekannt'}`} · unten letzter bekannter Stand</div></div>`;
+  if (l) {
+    const cpu = l.cpu * 100, mp = pct(l.mem.used, l.mem.total), sp = pct(l.swap.used, l.swap.total);
+    const io = Object.values(l.disk || {}).reduce((a, v) => ({ r: a.r + v.read, w: a.w + v.write }), { r: 0, w: 0 });
+    html += `<div class="metrics">
+      <div class="metric"><div class="lbl"><span>CPU</span><span>${l.cores} Threads</span></div><div class="val">${cpu.toFixed(0)}<small>%${l.iowait > .05 ? ` · IO ${(l.iowait * 100).toFixed(0)}%` : ''}</small></div>${spark([h.map(x => x.cpu * 100)], { max: 100, colors: [cssVar('--cpu')] })}</div>
+      <div class="metric"><div class="lbl"><span>RAM · ${bytes(l.mem.total)}</span><span>${l.swap.total ? `Swap ${sp.toFixed(0)}%` : ''}</span></div><div class="val">${mp.toFixed(0)}<small>% · ${bytes(l.mem.used)}</small></div>${spark([h.map(x => x.mem)], { max: l.mem.total, colors: [cssVar('--mem')] })}</div>
+      <div class="metric"><div class="lbl"><span>Disk I/O</span><span>alle Platten</span></div><div class="val" style="font-size:1.15rem;line-height:1.35"><span style="color:var(--disk)">Lesen ${bps(io.r)}</span><br><span class="muted">Schreiben ${bps(io.w)}</span></div>${spark([h.map(x => x.dw), h.map(x => x.dr)], { colors: [cssVar('--disk'), cssVar('--muted')] })}</div>
+    </div>`;
+    const nics = Object.entries(l.net || {}).sort(([a], [b]) => (a === 'tailscale0') - (b === 'tailscale0') || a.localeCompare(b));
+    html += `<div class="sect">Netzwerk-Ports</div><div class="nics">${nics.map(([k, v]) => {
+      const up = (v.state || 'up') === 'up';
+      return `<div class="nic ${up ? '' : 'down'}"><span class="dot ${up ? 'ok' : 'bad'}"></span><span class="n">${esc(nicName(k, v))}</span><span class="sp">${up ? speed(v.speed) : 'kein Link'}</span>
+        <span class="sub mono">${esc(k)}${v.addr ? ' · ' + esc(v.addr.split('/')[0]) : ''}</span>
+        <span class="tr"><b style="color:var(--rx)">↓ ${bits(v.rx)}</b> &nbsp; <b style="color:var(--tx)">↑ ${bits(v.tx)}</b></span></div>`;
+    }).join('')}</div>`;
+  }
+  // server hardware from the management controller (iRMC/IPMI)
+  if (b?.online) {
+    const S = nm => b.sensors.find(x => x.name === nm), v = x => x && x.value != null ? `${x.value} ${x.unit}` : '–';
+    const extra = b.sensors.filter(x => (x.unit === '°C' || x.unit === 'RPM') && x.value != null && !['Ambient', 'Systemboard'].includes(x.name));
+    html += `<div class="sect">Hardware · ${esc(b.name)}</div><div class="hw"><span class="pd">⚡ Gesamt <b>${v(S('Total Power'))}</b></span><span class="pd">PSU 1 <b>${v(S('PSU1 Power'))}</b></span><span class="pd">PSU 2 <b>${v(S('PSU2 Power'))}</b></span><span class="pd">Raum <b>${v(S('Ambient'))}</b></span><span class="pd">Board <b>${v(S('Systemboard'))}</b></span>${extra.slice(0, 6).map(x => `<span class="pd">${esc(x.name)} <b>${x.value}${x.unit === '°C' ? '°C' : ' rpm'}</b></span>`).join('')}</div>`;
+  }
+  // node-local storage (shared NAS volumes are shown once below)
+  const stor = (sl?.storage || []).filter(x => !x.shared && x.enabled !== 0 && x.active).sort((a, b) => (a.type === 'dir' ? -1 : 0) - (b.type === 'dir' ? -1 : 0) || b.total - a.total);
+  html += `<div class="sect">Speicher</div><div class="stors">${stor.length ? stor.map(x => { const pp = pct(x.used, x.total); return `<div class="stor"><span class="n">${esc(x.storage)}</span><span class="t">${STYPE[x.type] || esc(x.type)}</span>${bar(pp, cssVar('--disk'))}<span class="u">${bytes(x.used)} / ${bytes(x.total)}</span><span class="p">${pp.toFixed(0)}%</span></div>`; }).join('') : '<div class="faint">keine Daten</div>'}</div>`;
+  // physical disks with SMART health
+  const disks = sl?.disks || [];
+  if (disks.length) html += `<div class="disks">${disks.map(d => {
+    const hc = d.health === 'PASSED' || d.health === 'OK' ? 'c-ok' : d.health === 'UNKNOWN' || !d.health ? 'c-off' : 'c-bad';
+    const model = (d.model || '').replace(/_/g, ' ').replace(/^RAID 5 6 SAS 6G$/, 'RAID-Volume').trim() || d.devpath;
+    const wear = typeof d.wearout === 'number' ? ` · ${d.wearout}% Rest` : '';
+    return `<span class="pd"><b>${esc(d.devpath.replace('/dev/', ''))}</b>${esc(model)} · ${bytes(d.size, 1)}${wear}<span class="h ${hc}">${esc(d.health === 'UNKNOWN' ? 'SMART ?' : d.health || '?')}</span></span>`;
+  }).join('')}</div>`;
+  return html;
+}
+function renderRes(s) {
+  const nodes = Object.values(s.nodes).sort((a, b) => a.name.localeCompare(b.name, 'de', { numeric: true }));
+  const ids = ['node-a', 'node-b'];
+  ids.forEach((id, i) => { const n = nodes[i]; const el = $(id); el.style.display = n ? '' : 'none'; if (n) { el.classList.toggle('off', !n.online); patch(el, nodeCard(n, s)); } });
+  // shared storage (NAS volumes) once, from whichever node has the freshest view
+  const seen = {};
+  for (const n of nodes.filter(n => n.slow).sort((a, b) => (b.online - a.online))) for (const x of n.slow.storage || []) if (x.shared && x.enabled !== 0 && !seen[x.storage]) seen[x.storage] = x;
+  const nas = Object.values(seen).sort((a, b) => a.storage.localeCompare(b.storage));
+  const N = s.nas;
+  const nasCard = N ? (() => {
+    if (!N.online && !N.model) return `<div class="nas bad"><div class="ic">🗄</div><div class="n">${esc(N.name || 'NAS')}<span>keine Verbindung</span></div><div class="p c-bad">offline</div><div class="u">${esc(N.error || '')}</div></div>`;
+    const memPct = N.mem?.total ? 100 - (N.mem.avail + N.mem.cached) / N.mem.total * 100 : 0;
+    const dk = (N.disks || []).map(d => `<span class="${d.status === 'normal' && d.smart === 'normal' ? '' : d.status === 'not_use' ? 'c-off' : 'c-bad'}">${esc(d.id)} ${d.temp != null ? d.temp + '°' : '–'}</span>`).join(' · ');
+    return `<div class="nas ${N.online ? '' : 'bad'}"><div class="ic">💾</div><div class="n">${esc(N.model || N.name)}<span>${esc(N.dsm || '')}${N.update ? ' · <b class="c-warn">Update</b>' : ''}</span></div><div class="p">${N.online ? Math.round(N.cpuPct || 0) + '%' : '<span class="c-bad">offline</span>'}</div>${bar(N.cpuPct || 0, cssVar('--nas'))}<div class="u">CPU · RAM ${Math.round(memPct)}% von ${bytes(N.mem?.total)} · ${N.temp ? N.temp + ' °C' : ''} · Platten: ${dk}</div></div>`;
+  })() : '';
+  patch($('nas'), nasCard + nas.map(x => { const pp = pct(x.used, x.total); return `<div class="nas ${x.active ? '' : 'bad'}"><div class="ic">🗄</div><div class="n">${esc(x.storage)}<span>${STYPE[x.type] || esc(x.type)} · NAS</span></div><div class="p">${x.active ? pp.toFixed(1) + '%' : '<span class="c-bad">offline</span>'}</div>${bar(pp, cssVar('--nas'))}<div class="u">${bytes(x.used)} belegt · <b>${bytes(x.avail)}</b> frei · ${bytes(x.total)} gesamt</div></div>`; }).join(''));
+}
+
+// ---------- page 2: uptime & errors
+function renderUp(s, svcStatus) {
+  const nodes = Object.values(s.nodes);
+  const mons = Object.entries(s.kuma).sort(([a], [b]) => a.localeCompare(b));
+  const down = mons.filter(([, k]) => k.status === 0).length;
+  const ups = mons.map(([n]) => s.uptime?.[n]?.u24).filter(x => x != null);
+  const avg = ups.length ? ups.reduce((a, b) => a + b, 0) / ups.length * 100 : null;
+  const errs = s.containers.reduce((a, c) => a + (c.logs?.errors || 0), 0), warns = s.containers.reduce((a, c) => a + (c.logs?.warnings || 0), 0);
+  const p = primary(s);
+  const kpi = (l, v, sub, cls = '') => `<div class="kpi"><div class="l">${l}</div><div class="v ${cls}">${v}</div><div class="s">${sub}</div></div>`;
+  const nodeKpi = n => n.online && n.live ? kpi(`Uptime ${esc(n.name)}`, durDe(n.live.uptime), `online · ${nodeIp(n)}`, '') : kpi(`Uptime ${esc(n.name)}`, 'offline', n.lastSeen ? `zuletzt ${agoDe(n.lastSeen)}` : 'nicht erreichbar', 'c-bad');
+  const hosts = Object.entries(s.hosts || {});
+  patch($('kpis'),
+    kpi('Dienste', `${mons.length - down}/${mons.length}`, down ? `${down} down` : 'alle erreichbar', down ? 'c-bad' : 'c-ok') +
+    kpi('Ø Uptime 24 h', avg == null ? '–' : avg.toFixed(2) + '%', 'über alle Dienste', avg == null ? '' : avg >= 99.5 ? 'c-ok' : avg >= 95 ? 'c-warn' : 'c-bad') +
+    kpi('Fehler · 1 h', errs, `${warns} Warnungen`, errs ? 'c-bad' : 'c-ok') +
+    nodes.sort((a, b) => a.name.localeCompare(b.name, 'de', { numeric: true })).map(nodeKpi).join('') +
+    kpi('Docker-Hosts', `${hosts.filter(([, h]) => h.online).length}/${hosts.length}`, hosts.map(([k, h]) => `${k} ${h.online ? '✓' : '✗'}`).join(' · '), hosts.every(([, h]) => h.online) ? 'c-ok' : 'c-bad'));
+  // monitors with heartbeat bars
+  const BEATS = 40;
+  patch($('mons'), mons.length ? mons.map(([name, k]) => {
+    const u = s.uptime?.[name], st = k.status === 1 ? 'ok' : k.status === 0 ? 'bad' : k.status === 2 ? 'warn' : 'info';
+    const beats = (u?.beats || []).slice(-BEATS); const pad = BEATS - beats.length;
+    const up = u?.u24 != null ? u.u24 * 100 : null;
+    const ms = k.ms > 0 ? k.ms : u?.ping;
+    return `<div class="mon"><span class="dot ${st}"></span><span class="n">${esc(title(name))}</span><div class="beats">${'<i class="na"></i>'.repeat(pad)}${beats.map(b => `<i class="b${b}"></i>`).join('')}</div>
+      <span class="u ${up == null ? 'faint' : up >= 99.5 ? 'c-ok' : up >= 95 ? 'c-warn' : 'c-bad'}">${up == null ? '–' : (up >= 99.995 ? '100' : up.toFixed(2)) + '%'}</span><span class="ms">${ms > 0 ? Math.round(ms) + ' ms' : ''}</span></div>`;
+  }).join('') : '<div class="empty">Keine Uptime-Kuma-Monitore</div>');
+  patch($('mon-sum'), `${mons.length} Monitore`);
+  // error chips per container
+  const withErr = s.containers.filter(c => c.logs?.errors || c.logs?.warnings).sort((a, b) => (b.logs.errors - a.logs.errors) || (b.logs.warnings - a.logs.warnings));
+  patch($('errchips'), withErr.length ? withErr.map(c => `<span class="chip"><b>${esc(c.name)}</b>${c.logs.errors ? `<span class="e">${c.logs.errors} Fehler</span>` : ''}${c.logs.warnings ? `<span class="w">${c.logs.warnings} Warn.</span>` : ''}</span>`).join('')
+    : '<span class="c-ok">✓ Kein Container meldet Fehler oder Warnungen</span>');
+  const ev = s.events.filter(e => !e.noise).slice(0, 14);
+  patch($('issues'), ev.length ? ev.map(e => `<div class="iss"><span class="dot ${e.level === 'error' ? 'bad' : 'warn'}"></span><div class="hd"><b>${esc(e.container)} <span class="faint" style="font-weight:400">· ${esc(e.host)}</span></b><span class="faint">${agoDe(e.ts)}</span></div><div class="m mono">${esc(e.msg)}</div></div>`).join('')
+    : '<div class="allgood">✓ Keine Fehler oder Warnungen<br>in der letzten Stunde</div>');
+}
+const title = s => s.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+// ---------- page 3: guests & containers
+const guestNames = {};
+function renderRun(s) {
+  // guest list from the primary node; names/maxmem may only be known from a node's older snapshot
+  const nodes = Object.values(s.nodes);
+  for (const n of nodes) for (const g of n.slow?.guests || []) if (g.name) guestNames[g.id] = { name: g.name, maxmem: g.maxmem };
+  const p = primary(s);
+  const list = (p?.slow?.guests || nodes.find(n => n.slow)?.slow?.guests || []).filter(g => !g.template);
+  const byNode = {};
+  for (const g of list) (byNode[g.node] ??= []).push(g);
+  const nodeOnline = name => { const n = s.nodes[name]; if (n?.online) return true; const pn = p?.slow?.nodes?.find(x => x.node === name); return pn?.status === 'online'; };
+  let running = 0;
+  const html = Object.keys(byNode).sort((a, b) => a.localeCompare(b, 'de', { numeric: true })).map(node => {
+    const on = nodeOnline(node);
+    const gs = byNode[node].sort((a, b) => a.vmid - b.vmid);
+    const tiles = gs.map(g => {
+      const nm = g.name || guestNames[g.id]?.name || `${g.type === 'qemu' ? 'VM' : 'CT'} ${g.vmid}`;
+      let cls, st, sub;
+      const srvOff = s.bmc?.online && s.bmc.node === node && s.bmc.power === 'off';
+      if ((!on || g.status === 'unknown') && srvOff) { cls = 'stopped'; st = 'Server aus'; sub = `${node} ist ausgeschaltet (${esc(s.bmc.name)})`; }
+      else if (!on || g.status === 'unknown') { cls = 'off'; st = 'Keine Verbindung'; sub = `Node ${node} nicht erreichbar`; }
+      else if (g.status === 'running') { running++; cls = 'ok'; st = 'Läuft'; sub = `Up ${durDe(g.uptime || 0)} · CPU ${((g.cpu || 0) * 100).toFixed(0)}% · RAM ${bytes(g.mem)} / ${bytes(g.maxmem)}`; }
+      else if (g.status === 'paused' || g.status === 'suspended') { cls = 'warn'; st = 'Pausiert'; sub = 'angehalten'; }
+      else { cls = 'stopped'; st = 'Aus'; sub = `abgeschaltet · ${bytes(g.maxmem || guestNames[g.id]?.maxmem)} RAM zugewiesen`; }
+      return `<div class="tile ${cls}"><span class="n"><span class="kind">${g.type === 'qemu' ? 'VM' : 'LXC'}</span><span class="id">${g.vmid}</span>${esc(nm)}</span><span class="st">${st}</span><span class="sub">${sub}</span></div>`;
+    }).join('');
+    const nodeOff = !on && s.bmc?.online && s.bmc.node === node && s.bmc.power === 'off';
+    return `<div class="grp"><span class="dot ${on ? 'ok' : 'bad'}"></span>${esc(node)}${on ? '' : nodeOff ? ' · <span class="c-off">ausgeschaltet</span>' : ' · <span class="c-bad">offline</span>'}<span class="cnt">${gs.filter(g => on && g.status === 'running').length}/${gs.length} laufen</span></div><div class="tiles g1">${tiles}</div>`;
+  }).join('');
+  patch($('guests'), html || '<div class="empty">Keine Proxmox-Daten</div>');
+  patch($('g-sum'), `${running}/${list.length} laufen`);
+
+  // containers grouped by docker host; unreachable hosts show their last known containers
+  const hosts = Object.entries(s.hosts || {}).sort(([a], [b]) => a.localeCompare(b));
+  patch($('ctrs'), hosts.map(([hn, h]) => {
+    let items;
+    if (h.online) {
+      items = s.containers.filter(c => c.host === hn).map(c => {
+        let cls, st, sub;
+        if (c.state === 'running' && c.health === 'unhealthy') { cls = 'bad'; st = 'Unhealthy'; }
+        else if (c.state === 'running' && c.health === 'health: starting') { cls = 'warn'; st = 'Startet'; }
+        else if (c.state === 'running') { cls = 'ok'; st = 'Läuft'; }
+        else if (c.state === 'restarting') { cls = 'warn'; st = 'Neustart'; }
+        else if (c.state === 'paused') { cls = 'warn'; st = 'Pausiert'; }
+        else if (c.state === 'created') { cls = 'stopped'; st = 'Erstellt'; }
+        else { cls = 'bad'; st = 'Aus'; }
+        sub = c.state === 'running' && c.stats ? `CPU ${(c.stats.cpu * 100).toFixed(1)}% · ${bytes(c.stats.mem)}${c.logs?.errors ? ` · <span class="c-bad">${c.logs.errors} Fehler</span>` : ''}` : esc(c.status.replace(/^Exited/, 'Beendet').replace(/^Up/, 'Seit').replace(/ ago$/, ''));
+        return `<div class="tile ${cls}"><span class="n">${esc(c.name)}</span><span class="st">${st}</span><span class="sub">${sub}</span></div>`;
+      });
+    } else {
+      items = (s.hostSnapshot?.[hn] || []).map(c => `<div class="tile off"><span class="n">${esc(c.name)}</span><span class="st">Keine Verb.</span><span class="sub">Host ${esc(hn)} nicht erreichbar</span></div>`);
+      if (!items.length) items = [`<div class="tile off"><span class="n">${esc(hn)}</span><span class="st">Keine Verbindung</span><span class="sub">${esc(h.error || 'nicht erreichbar')}</span></div>`];
+    }
+    const hc = s.containers.filter(c => c.host === hn);
+    return `<div class="grp"><span class="dot ${h.online ? 'ok' : 'bad'}"></span>${esc(hn)} <span class="faint" style="font-weight:500;letter-spacing:0">${esc(h.ip || '')}</span>${h.online ? '' : ' · <span class="c-bad">keine Verbindung</span>'}<span class="cnt">${h.online ? `${hc.filter(c => c.state === 'running').length}/${hc.length} laufen` : (h.lastSeen ? 'zuletzt ' + agoDe(h.lastSeen) : '')}</span></div><div class="tiles g3">${items.join('')}</div>`;
+  }).join('') || '<div class="empty">Keine Docker-Hosts</div>');
+}
+
+// ---------- header status + footer
+function renderCommon(s) {
+  const p = primary(s);
+  const mons = Object.values(s.kuma);
+  const down = mons.filter(k => k.status === 0).length;
+  const nodesDown = Object.values(s.nodes).filter(n => !n.online);
+  const hostsDown = Object.entries(s.hosts || {}).filter(([, h]) => !h.online);
+  const ctrBad = s.containers.filter(c => c.state !== 'running' || c.health === 'unhealthy').length;
+  const cluster = p?.slow?.quorum?.find(x => x.type === 'cluster');
+  const msgs = [];
+  if (down) msgs.push(`${down} Dienst${down > 1 ? 'e' : ''} down`);
+  if (nodesDown.length) msgs.push(`${nodesDown.map(n => n.name).join(', ')} offline`);
+  if (hostsDown.length) msgs.push(`${hostsDown.map(([k]) => k).join(', ')} nicht erreichbar`);
+  if (ctrBad) msgs.push(`${ctrBad} Container gestört`);
+  const ov = $('overall');
+  ov.className = 'overall ' + (down || hostsDown.length || ctrBad ? 'bad' : msgs.length || (cluster && !cluster.quorate) ? 'warn' : 'ok');
+  ov.lastElementChild.textContent = msgs.length ? msgs.join(' · ') : 'Alles in Ordnung';
+  const fresh = p && Date.now() - p.lastSeen < 8000;
+  patch($('foot'), (cluster && !cluster.quorate ? `<span class="c-warn">⚠ Cluster ohne Quorum</span>` : cluster ? `<span>Cluster <b style="color:var(--text)">${esc(cluster.name)}</b> · Quorum ok</span>` : '') +
+    `<span>Container <b style="color:var(--text)">${s.containers.filter(c => c.state === 'running').length}/${s.containers.length}</b> laufen</span>` +
+    `<span class="faint">${paused ? 'Playlist pausiert (Leertaste)' : `Wechsel alle ${INTERVAL / 1000} s · ← → zum Blättern`}</span>` +
+    `<span class="upd"><span class="dot ${fresh ? 'ok' : 'bad'}"></span>${fresh ? 'Live' : 'Daten veraltet'}</span>`);
+}
+
+function render(s, err) {
+  $('conn').style.display = err ? 'grid' : 'none';
+  if (!s) return;
+  renderCommon(s);
+  renderRes(s);
+  renderUp(s);
+  renderRun(s);
+}
+poll(render, 2000);
+
+// ---------- TV niceties
+setInterval(() => { $('root').style.transform = `translate(${Math.round(Math.random() * 8 - 4)}px, ${Math.round(Math.random() * 8 - 4)}px)`; }, 180000);
+async function wake() { try { await navigator.wakeLock?.request('screen'); } catch {} }
+wake(); document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && wake());
+let ct; document.addEventListener('mousemove', () => { document.body.classList.add('cursor'); clearTimeout(ct); ct = setTimeout(() => document.body.classList.remove('cursor'), 2500); });
+document.addEventListener('click', () => { try { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen(); } catch {} });
+setTimeout(() => location.reload(), 6 * 3600 * 1000);
+</script>
+</body>
+</html>

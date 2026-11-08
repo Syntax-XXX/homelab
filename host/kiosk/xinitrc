@@ -1,0 +1,17 @@
+#!/bin/sh
+# Kiosk: zeigt den TV-Modus des Dashboards im Vollbild (Service: kiosk.service)
+# Adresse anpassen: DASHBOARD_URL in /etc/default/kiosk oder hier.
+[ -f /etc/default/kiosk ] && . /etc/default/kiosk
+DASHBOARD_URL="${DASHBOARD_URL:-http://192.168.1.20/tv}"
+xrandr --output DisplayPort-1 --mode 1920x1080 2>/dev/null || xrandr --auto
+xset s off; xset s noblank; xset -dpms; xset b off
+unclutter -idle 1 -root &
+# Chromium-Profil bei jedem Start sauber halten (keine "wiederherstellen"-Dialoge)
+sed -i 's/"exited_cleanly":false/"exited_cleanly":true/; s/"exit_type":"[^"]*"/"exit_type":"Normal"/' /home/kiosk/chromium/Default/Preferences 2>/dev/null
+exec chromium --kiosk --no-first-run --no-default-browser-check --noerrdialogs \
+  --disable-infobars --disable-session-crashed-bubble --disable-translate \
+  --disable-features=Translate,MediaRouter --check-for-update-interval=31536000 \
+  --renderer-process-limit=2 --disk-cache-size=33554432 \
+  --password-store=basic --user-data-dir=/home/kiosk/chromium \
+  --window-position=0,0 --window-size=1920,1080 \
+  "$DASHBOARD_URL"

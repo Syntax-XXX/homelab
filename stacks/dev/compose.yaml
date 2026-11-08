@@ -1,0 +1,62 @@
+name: dev
+services:
+  forgejo:
+    image: codeberg.org/forgejo/forgejo:17.0.1
+    container_name: forgejo
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      TZ: ${TZ:-Europe/Berlin}
+      FORGEJO__database__DB_TYPE: sqlite3
+      FORGEJO__server__DOMAIN: ${FORGEJO_DOMAIN:-git.local}
+      FORGEJO__server__ROOT_URL: ${FORGEJO_ROOT_URL:-http://git.local/}
+      FORGEJO__server__HTTP_PORT: "3000"
+      FORGEJO__server__SSH_DOMAIN: ${FORGEJO_DOMAIN:-git.local}
+      FORGEJO__server__SSH_PORT: "2222"
+      FORGEJO__server__SSH_LISTEN_PORT: "22"
+      FORGEJO__server__LFS_START_SERVER: "true"
+      FORGEJO__security__INSTALL_LOCK: "true"
+      FORGEJO__service__DISABLE_REGISTRATION: "true"
+      FORGEJO__actions__ENABLED: "true"
+      FORGEJO__actions__DEFAULT_ACTIONS_URL: https://code.forgejo.org
+      FORGEJO__packages__ENABLED: "true"
+      FORGEJO__log__LEVEL: Warn
+      FORGEJO__repository__ROOT: /git-storage/repositories
+    volumes:
+      - ${APPDATA:-/opt/appdata}/forgejo:/data
+      - ${GIT_STORAGE:-/srv/git}:/git-storage
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "3300:3000"
+      - "2222:22"
+    labels:
+      dashboard.name: Forgejo
+      dashboard.group: Development
+      dashboard.description: Git-Server mit Actions (Repos auf der NAS)
+      dashboard.url: http://git.local
+    healthcheck: { test: ["CMD", "curl", "-fs", "http://localhost:3000/api/healthz"], interval: 60s, timeout: 10s, retries: 3, start_period: 60s }
+  code-server:
+    image: lscr.io/linuxserver/code-server:4.105.1
+    container_name: code-server
+    restart: unless-stopped
+    mem_limit: 1536m
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Europe/Berlin}
+      PASSWORD: ${CODE_PASSWORD}
+      DEFAULT_WORKSPACE: /workspace
+    volumes:
+      - ${APPDATA:-/opt/appdata}/code-server:/config
+      - ${GIT_STORAGE:-/srv/git}/workspace:/workspace
+    extra_hosts:
+      - "git.local:${HOST_IP}"
+    ports:
+      - "8443:8443"
+    labels:
+      dashboard.name: Code-Server
+      dashboard.group: Development
+      dashboard.description: VS Code im Browser (Projekte auf der NAS)
+      dashboard.url: http://code.local

@@ -1,0 +1,6 @@
+[Unit]
+Description=Deploy dashboard stats agent to all cluster nodes
+
+[Service]
+Type=oneshot
+ExecStart=/opt/selfhost-dash-agent/deploy-peer.sh

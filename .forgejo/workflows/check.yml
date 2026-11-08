@@ -1,0 +1,46 @@
+name: Prüfen & Paket bauen
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: debian
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: YAML aller Compose-Dateien prüfen
+        run: |
+          pip3 install --quiet --break-system-packages pyyaml 2>/dev/null || apt-get install -y -qq python3-yaml >/dev/null
+          python3 - <<'PY'
+          import glob, sys, yaml
+          bad = 0
+          for f in sorted(glob.glob("stacks/*/compose.yaml")):
+              try:
+                  d = yaml.safe_load(open(f))
+                  assert "services" in d, "keine services"
+                  print(f"ok   {f}  ({len(d['services'])} Dienste)")
+              except Exception as e:
+                  bad += 1; print(f"FAIL {f}: {e}")
+          sys.exit(bad)
+          PY
+
+      - name: Shell-Skripte prüfen
+        run: for f in setup.sh presets/*.sh host/*/*.sh; do bash -n "$f" && echo "ok   $f"; done
+
+      - name: Keine echten Secrets in .env.example
+        run: |
+          if grep -rEn '(gsk_|ghp_|github_pat_|xox[bp]-|[0-9]{8,}:[A-Za-z0-9_-]{30,})' --include='*.example' --include='*.yaml' --include='*.md' . ; then
+            echo "Möglicher Token gefunden!"; exit 1; fi
+          echo "sauber"
+
+      # Paket mit Doku + Stacks auf die NAS legen (nur wenn der Runner /builds hat)
+      - name: Paket auf NAS ablegen
+        if: ${{ always() }}
+        run: |
+          [ -d /builds ] || { echo "kein /builds – übersprungen"; exit 0; }
+          ZIEL="/builds/${GITHUB_REPOSITORY#*/}/$(date +%Y-%m-%d_%H-%M)_${GITHUB_SHA::7}"
+          mkdir -p "$ZIEL"
+          tar czf "$ZIEL/homelab.tar.gz" --exclude=.git .
+          ln -sfn "$(basename "$ZIEL")" "/builds/${GITHUB_REPOSITORY#*/}/latest"
+          echo "Fertig: $ZIEL"

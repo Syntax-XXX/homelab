@@ -1,0 +1,17 @@
+name: dashboard
+services:
+  dashboard:
+    build: .
+    image: selfhost-dashboard:local
+    container_name: dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file: dashboard.env
+    group_add:
+      - "${DOCKER_GID:-989}"   # GID der docker-Gruppe (getent group docker) – Lesezugriff auf den Socket
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./data:/app/data

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Release-Center</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%231e293b'/><path d='M16 6v14m-6-6 6 6 6-6M8 25h16' stroke='%2334d399' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<style>
+:root { --bg:#1e293b; --card:rgba(255,255,255,.05); --card2:rgba(255,255,255,.08); --line:rgba(148,163,184,.14); --line2:rgba(148,163,184,.24);
+  --text:#e2e8f0; --muted:#94a3b8; --faint:#64748b; --ok:#34d399; --warn:#fbbf24; --bad:#f87171; --info:#60a5fa; }
+* { box-sizing:border-box; }
+html { background:var(--bg); }
+body { margin:0; color:var(--text); font-family:Manrope,Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:radial-gradient(1200px 600px at 10% -10%,rgba(52,211,153,.07),transparent 60%),var(--bg); min-height:100vh; }
+a { color:var(--info); text-decoration:none; } a:hover { text-decoration:underline; }
+.wrap { max-width:1100px; margin:0 auto; padding:20px 16px 48px; }
+header { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+h1 { font-size:20px; margin:0; }
+.pill { font-size:12px; padding:3px 10px; border-radius:99px; background:var(--card); color:var(--muted); }
+.pill.ok { color:var(--ok); } .pill.bad { color:var(--bad); }
+.nav { margin-left:auto; display:flex; gap:8px; }
+.nav a { padding:7px 12px; border-radius:8px; background:var(--card); border:1px solid var(--line); font-size:13px; color:var(--muted); }
+.tabs { display:flex; gap:6px; margin:6px 0 14px; flex-wrap:wrap; }
+.tabs button { font:inherit; font-size:13px; padding:6px 12px; border-radius:8px; border:1px solid var(--line); background:transparent; color:var(--muted); cursor:pointer; }
+.tabs button.act { background:var(--card2); color:var(--text); border-color:var(--line2); }
+.tabs b { margin-left:4px; color:var(--text); }
+.banner { background:rgba(251,191,36,.08); border:1px solid rgba(251,191,36,.3); color:#fde68a; border-radius:10px; padding:10px 14px; font-size:13px; margin-bottom:14px; }
+.card { background:var(--card); border-radius:12px; padding:14px 16px; margin-bottom:12px; border-left:4px solid var(--line2); }
+.card.ok { border-left-color:var(--ok); } .card.warn { border-left-color:var(--warn); } .card.block, .card.error, .card.failed { border-left-color:var(--bad); } .card.pushed { border-left-color:var(--info); }
+.top { display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
+.repo { font-weight:700; font-size:16px; }
+.title { color:var(--muted); font-size:14px; }
+.meta { margin-left:auto; color:var(--faint); font-size:12px; white-space:nowrap; }
+.sub { color:var(--faint); font-size:12px; margin-top:4px; display:flex; gap:12px; flex-wrap:wrap; }
+.mono { font-family:ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace; }
+.verdict { display:inline-flex; align-items:center; gap:6px; font-weight:700; font-size:13px; padding:3px 10px; border-radius:99px; margin-top:10px; }
+.verdict.ok { background:rgba(52,211,153,.12); color:var(--ok); } .verdict.warn { background:rgba(251,191,36,.12); color:var(--warn); } .verdict.block { background:rgba(248,113,113,.12); color:var(--bad); }
+.summary { margin:8px 0 4px; font-size:14px; line-height:1.5; }
+ul.f { margin:6px 0 0; padding:0; list-style:none; font-size:13px; }
+ul.f li { padding:5px 0; border-top:1px solid var(--line); display:flex; gap:8px; }
+.sev { font-size:11px; font-weight:700; padding:1px 7px; border-radius:6px; height:fit-content; white-space:nowrap; }
+.sev.hoch { background:rgba(248,113,113,.15); color:var(--bad); } .sev.mittel { background:rgba(251,191,36,.15); color:var(--warn); } .sev.niedrig { background:rgba(148,163,184,.15); color:var(--muted); }
+.secrets { margin-top:8px; font-size:13px; color:var(--bad); }
+.actions { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; align-items:center; }
+button.b { font:inherit; font-size:13px; font-weight:600; padding:8px 14px; border-radius:8px; border:1px solid var(--line2); background:var(--card2); color:var(--text); cursor:pointer; }
+button.b.go { background:#059669; border-color:#059669; color:#fff; } button.b.go:hover { background:#047857; }
+button.b.no:hover { color:var(--bad); }
+button.b:disabled { opacity:.5; cursor:wait; }
+select, input[type=text] { font:inherit; font-size:13px; padding:7px 9px; border-radius:8px; border:1px solid var(--line2); background:transparent; color:var(--text); }
+select option { background:#1e293b; }
+.err { color:var(--bad); font-size:13px; margin-top:8px; }
+.empty { color:var(--faint); text-align:center; padding:40px 0; }
+.spin { display:inline-block; width:10px; height:10px; border:2px solid var(--muted); border-right-color:transparent; border-radius:50%; animation:s 1s linear infinite; }
+@keyframes s { to { transform:rotate(360deg); } }
+@media (max-width:600px) { .meta { margin-left:0; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🚀 Release-Center</h1>
+    <span class="pill" id="gh">…</span>
+    <span class="pill" id="ai">…</span>
+    <nav class="nav"><a id="fj" href="#" target="_blank">Forgejo ↗</a><a id="code" href="#" target="_blank">Code ↗</a><a id="dash" href="#">Dashboard</a></nav>
+  </header>
+  <div id="banner"></div>
+  <div class="tabs" id="tabs"></div>
+  <div id="list"></div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const TABS = [['pending','Zur Freigabe'],['reviewing','In Prüfung'],['pushed','Gepusht'],['rejected','Abgelehnt'],['failed','Build fehlgeschlagen'],['all','Alle']];
+let tab = 'pending', S = null, busy = {}, errs = {};
+const when = t => t ? new Date(t).toLocaleString('de-DE', { dateStyle:'short', timeStyle:'short' }) : '';
+const VERD = { ok:'✅ Sieht gut aus', warn:'⚠️ Bitte prüfen', block:'⛔ Nicht pushen' };
+const group = it => ({ queued:'reviewing', reviewing:'reviewing', error:'pending', superseded:'rejected' }[it.status] || it.status);
+
+async function load() { try { S = await (await fetch('/api/state', { cache:'no-store' })).json(); render(); } catch {} }
+function render() {
+  $('gh').textContent = S.github.connected ? 'GitHub: ' + S.github.user : 'GitHub nicht verbunden'; $('gh').className = 'pill ' + (S.github.connected ? 'ok' : 'bad');
+  $('ai').textContent = S.ai.model ? 'KI: ' + S.ai.model.split('/').pop() + ' (Groq)' : 'KI aus'; $('ai').className = 'pill ' + (S.ai.model ? 'ok' : 'bad');
+  $('fj').href = S.forgejo || '#'; $('code').href = S.links?.code || '#'; $('dash').href = S.links?.dashboard || '#';
+  $('banner').innerHTML = S.github.connected ? '' : '<div class="banner">GitHub ist noch nicht verbunden – Builds werden geprüft, aber Pushen geht erst, wenn GITHUB_USER und GITHUB_TOKEN gesetzt sind.</div>';
+  const cnt = k => S.items.filter(i => k === 'all' || group(i) === k).length;
+  $('tabs').innerHTML = TABS.map(([k,l]) => `<button data-t="${k}" class="${k===tab?'act':''}">${l}<b>${cnt(k)||''}</b></button>`).join('');
+  const items = S.items.filter(i => tab === 'all' || group(i) === tab);
+  $('list').innerHTML = items.length ? items.map(card).join('') : `<div class="empty">Nichts hier. Push ein Projekt in Forgejo – nach dem Build erscheint es zur Freigabe.</div>`;
+}
+function card(it) {
+  const v = it.ai?.verdict, cls = it.status === 'pushed' ? 'pushed' : it.status === 'error' ? 'error' : it.status === 'failed' ? 'failed' : (v || '');
+  const known = S.repos[it.repo]; const first = !known?.pushedSha;
+  let body = '';
+  if (it.status === 'queued' || it.status === 'reviewing') body = `<div class="sub"><span class="spin"></span> KI und Secret-Scan laufen …</div>`;
+  else if (it.status === 'failed') body = `<div class="err">Der Build ist fehlgeschlagen – siehe <a href="${esc(it.runUrl)}" target="_blank">Log</a>.</div>`;
+  else if (it.ai) body = `<div class="verdict ${v}">${VERD[v]}</div><div class="summary">${esc(it.ai.summary)}</div>` +
+      (it.secrets?.length ? `<div class="secrets">🔑 Gitleaks: ${it.secrets.length} mögliche Secrets – ${it.secrets.slice(0,5).map(s => `<span class="mono">${esc(s.file)}:${s.line}</span> (${esc(s.rule)})`).join(', ')}</div>` : '') +
+      (it.ai.findings?.length ? `<ul class="f">${it.ai.findings.map(f => `<li><span class="sev ${esc(f.severity)}">${esc(f.severity)}</span><span>${f.file ? `<span class="mono">${esc(f.file)}${f.line ? ':'+f.line : ''}</span> – ` : ''}${esc(f.text)}</span></li>`).join('')}</ul>` : '');
+  if (it.error) body += `<div class="err">Fehler: ${esc(it.error)}</div>`;
+  if (errs[it.id]) body += `<div class="err">${esc(errs[it.id])}</div>`;
+  let act = '';
+  if (['pending','error'].includes(it.status)) act = `<div class="actions">
+      ${first ? `<select data-vis="${esc(it.id)}"><option value="private">Neues GitHub-Repo: privat</option><option value="public" ${it.repo.endsWith('/homelab')?'selected':''}>Neues GitHub-Repo: öffentlich</option></select>` : `<span class="sub">→ github.com/${esc(S.github.user)}/${esc(known.ghName)}</span>`}
+      <button class="b go" data-a="push" data-id="${esc(it.id)}" ${busy[it.id]?'disabled':''}>${busy[it.id]==='push'?'Pushe …':'Auf GitHub pushen'}</button>
+      <button class="b no" data-a="reject" data-id="${esc(it.id)}">Ablehnen</button>
+      <button class="b" data-a="review" data-id="${esc(it.id)}">Neu prüfen</button></div>`;
+  if (it.status === 'pushed') act = `<div class="actions"><a href="${esc(it.ghUrl)}" target="_blank">${esc(it.ghUrl)} ↗</a></div>`;
+  return `<div class="card ${cls}"><div class="top"><span class="repo">${esc(it.repo.split('/')[1])}</span><span class="title">${esc(it.title)}</span><span class="meta">${when(it.created)}</span></div>
+    <div class="sub"><span class="mono">${esc(it.sha.slice(0,8))}</span><span>${esc(it.branch)}</span>${it.diffStat ? `<span>${esc(it.diffStat)}</span>` : ''}<a href="${esc(it.runUrl)}" target="_blank">Build-Log ↗</a><span>Artefakte: ${esc(S.buildsPath)}/${esc(it.repo.split('/')[1])}/latest</span>${it.base ? '' : '<span>erster Push: kompletter Stand geprüft</span>'}</div>
+    ${body}${act}</div>`;
+}
+document.addEventListener('click', async e => {
+  const t = e.target.closest('[data-t]'); if (t) { tab = t.dataset.t; return render(); }
+  const b = e.target.closest('button[data-a]'); if (!b) return;
+  const id = b.dataset.id, a = b.dataset.a, it = S.items.find(i => i.id === id);
+  const opts = {};
+  if (a === 'push') {
+    const vis = document.querySelector(`select[data-vis="${CSS.escape(id)}"]`); if (vis) opts.visibility = vis.value;
+    if (it.ai?.verdict === 'block' && !confirm('Die KI rät vom Pushen ab. Trotzdem pushen?')) return;
+    if (it.secrets?.length) { if (!confirm(`Gitleaks hat ${it.secrets.length} mögliche Secrets gefunden. Wirklich trotzdem pushen?`)) return; opts.force = true; }
+    if (!confirm(`${it.repo.split('/')[1]} (${it.sha.slice(0,7)}) jetzt auf GitHub pushen?`)) return;
+  }
+  busy[id] = a; errs[id] = null; render();
+  try { const r = await fetch(`/api/item/${encodeURIComponent(id)}/${a}`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(opts) }); const j = await r.json(); if (!r.ok) errs[id] = j.error; }
+  catch (x) { errs[id] = String(x); }
+  busy[id] = null; await load();
+});
+load(); setInterval(load, 5000);
+</script>
+</body>
+</html>

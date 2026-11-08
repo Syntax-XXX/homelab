@@ -1,0 +1,5 @@
+[
+  {"group": "Developer",     "items": [{"name": "GitHub",  "abbr": "GH", "url": "https://github.com/"}]},
+  {"group": "Social",        "items": [{"name": "Reddit",  "abbr": "RE", "url": "https://reddit.com/"}]},
+  {"group": "Entertainment", "items": [{"name": "YouTube", "abbr": "YT", "url": "https://youtube.com/"}]}
+]

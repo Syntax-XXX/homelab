@@ -1,0 +1,19 @@
+name: release-center
+services:
+  release-center:
+    build: .
+    image: release-center:local
+    container_name: release-center
+    restart: unless-stopped
+    env_file: release-center.env
+    mem_limit: 256m
+    volumes:
+      - ./data:/data
+    ports:
+      - "3200:3000"
+    healthcheck: { test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"], interval: 60s, timeout: 10s, retries: 3 }
+    labels:
+      dashboard.name: Release-Center
+      dashboard.group: Development
+      dashboard.description: Builds prüfen (KI + Secret-Scan) und auf GitHub pushen
+      dashboard.url: http://release.local

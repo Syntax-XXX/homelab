@@ -1,0 +1,61 @@
+# Reverse-Proxy: hübsche Namen statt IP:Port.
+# Die Namen *.local werden per mDNS veröffentlicht (host/avahi) – alternativ im Router-DNS eintragen.
+{
+	auto_https off
+}
+(app) {
+	reverse_proxy host.docker.internal:{args[0]}
+}
+http://jellyfin.local {
+	import app 8096
+}
+http://seerr.local {
+	import app 5055
+}
+http://sonarr.local {
+	import app 8989
+}
+http://radarr.local {
+	import app 7878
+}
+http://prowlarr.local {
+	import app 9696
+}
+http://bazarr.local {
+	import app 6767
+}
+http://qbittorrent.local {
+	import app 8080
+}
+http://mediathekarr.local {
+	import app 5007
+}
+http://aiostreams.local {
+	import app 3100
+}
+http://comet.local {
+	import app 8000
+}
+http://uptime.local {
+	import app 3001
+}
+http://dozzle.local {
+	import app 8888
+}
+http://git.local {
+	import app 3300
+}
+http://code.local {
+	import app 8443
+}
+http://release.local {
+	import app 3200
+}
+# Cloud-Stack (läuft mit CLOUD_HTTP_PORT=8081 auf demselben Host)
+http://nextcloud.local, http://paperless.local, http://guacamole.local, http://obsidian.local {
+	reverse_proxy host.docker.internal:8081
+}
+# alles andere (IP, selfhost.local) -> Dashboard
+http:// {
+	import app 3000
+}

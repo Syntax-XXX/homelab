@@ -1,0 +1,7 @@
+[Unit]
+Description=Kiosk-Monitor jeden Morgen um 8:00 einschalten
+[Timer]
+OnCalendar=*-*-* 08:00:00
+Persistent=false
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,44 @@
+name: downloaders
+networks: { media: { external: true } }
+services:
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:5.2.4
+    container_name: qbittorrent
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Europe/Berlin}
+      UMASK: "002"
+      WEBUI_PORT: "8080"
+      TORRENTING_PORT: "6881"
+    volumes:
+      - ${APPDATA:-/opt/appdata}/qbittorrent:/config
+      - type: bind
+        source: ${MEDIA_DATA:-/srv/media/data}
+        target: /data
+        bind: { create_host_path: false }
+    ports: ["8080:8080", "6881:6881", "6881:6881/udp"]
+    networks: [media]
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    healthcheck: { test: ["CMD", "curl", "-fs", "-o", "/dev/null", "http://localhost:8080"], interval: 60s, timeout: 10s, retries: 3, start_period: 60s }
+  mediathekarr:
+    image: pcjones/mediathekarr:beta
+    container_name: mediathekarr
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Europe/Berlin}
+      DOWNLOAD_INCOMPLETE_PATH: /data/downloads/mediathek/incomplete
+      DOWNLOAD_COMPLETE_PATH: /data/downloads/mediathek/complete
+      MEDIATHEKARR_API_BASE_URL: https://mediathekarr.pcjones.de/api/v1
+    volumes:
+      - ${APPDATA:-/opt/appdata}/mediathekarr:/app/config
+      - type: bind
+        source: ${MEDIA_DATA:-/srv/media/data}
+        target: /data
+        bind: { create_host_path: false }
+    ports: ["5007:5007"]
+    networks: [media]
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]

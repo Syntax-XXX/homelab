@@ -1,0 +1,5 @@
+#!/bin/sh
+# Veröffentlicht <name>.local -> aktuelle IPv4 von ens18 per mDNS (install.sh ersetzt das Interface)
+IP=$(ip -4 -o addr show ens18 | awk '{print $4}' | cut -d/ -f1 | head -1)
+[ -n "$IP" ] || { echo "no IP on ens18"; exit 1; }
+exec /usr/bin/avahi-publish -a -R "$1.local" "$IP"

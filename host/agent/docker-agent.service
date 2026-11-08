@@ -1,0 +1,11 @@
+[Unit]
+Description=Selfhost dashboard Docker agent
+After=docker.service network-online.target
+Requires=docker.service
+[Service]
+Environment=BIND=0.0.0.0  # besser: die LAN-IP dieses Hosts
+ExecStart=/usr/bin/python3 /opt/selfhost-dash-agent/docker-agent.py
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target

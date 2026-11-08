@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stromzähler pve</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%231e293b'/><path d='M18 4 8 18h7l-2 10 10-14h-7z' fill='%23fbbf24'/></svg>">
+<style>
+:root {
+  --bg: #1e293b; --card: rgba(255,255,255,.05); --card-hover: rgba(255,255,255,.08);
+  --line: rgba(148,163,184,.14); --line-2: rgba(148,163,184,.24);
+  --text: #e2e8f0; --muted: #94a3b8; --faint: #64748b;
+  --w: #fbbf24; --p1: #60a5fa; --p2: #a78bfa; --ok: #34d399; --bad: #f87171;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); }
+body { margin: 0; color: var(--text); font-family: Manrope, Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: radial-gradient(1200px 600px at 10% -10%, rgba(251,191,36,.07), transparent 60%), var(--bg); min-height: 100vh; }
+a { color: inherit; text-decoration: none; }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 20px 16px 40px; }
+header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+h1 { font-size: 20px; margin: 0; font-weight: 700; }
+.state { font-size: 12px; padding: 3px 9px; border-radius: 99px; background: var(--card); color: var(--muted); }
+.state.on { color: var(--ok); } .state.off { color: var(--bad); }
+.nav { margin-left: auto; display: flex; gap: 8px; }
+.nav a { padding: 7px 12px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.nav a:hover { color: var(--text); background: var(--card-hover); }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.tile { background: var(--card); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+.tile .k { font-size: 12px; color: var(--muted); }
+.tile .v { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 4px; white-space: nowrap; }
+.tile .v small { font-size: 14px; color: var(--muted); font-weight: 600; margin-left: 3px; }
+.tile .s { font-size: 12px; color: var(--faint); margin-top: 3px; }
+.tile.big .v { font-size: 44px; color: var(--w); }
+.tick { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--w); margin-right: 6px; vertical-align: middle; opacity: .25; transition: opacity .2s; }
+.tick.flash { opacity: 1; }
+.panel { background: var(--card); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
+.ph { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.ph h2 { font-size: 14px; margin: 0; font-weight: 600; }
+.ranges { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; }
+.ranges button { font: inherit; font-size: 12px; padding: 5px 10px; border-radius: 7px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
+.ranges button.act { background: var(--card-hover); color: var(--text); border-color: var(--line-2); }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.legend label { cursor: pointer; display: flex; align-items: center; gap: 5px; }
+.legend i { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
+.chart { position: relative; height: 340px; }
+canvas { width: 100%; height: 100%; display: block; }
+.tip { position: absolute; pointer-events: none; background: #0f172a; border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 9px; font-size: 12px; white-space: nowrap; display: none; z-index: 2; }
+.bars { display: flex; align-items: flex-end; gap: 4px; height: 130px; }
+.bars .b { flex: 1; min-width: 0; max-width: 46px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; }
+.bars .b span { display: block; width: 100%; background: var(--w); opacity: .75; border-radius: 3px 3px 0 0; min-height: 1px; }
+.bars .b.today span { opacity: 1; }
+.bars .b em { font-style: normal; font-size: 10px; color: var(--faint); margin-top: 4px; }
+.bars .b:hover span { opacity: 1; }
+.price { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.price input { width: 64px; font: inherit; font-size: 12px; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--text); }
+.note { font-size: 12px; color: var(--faint); }
+@media (max-width: 600px) { .chart { height: 240px; } .tile.big .v { font-size: 36px; } .bars .b em { display: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>⚡ Stromzähler pve</h1>
+    <span class="state" id="state">…</span>
+    <nav class="nav"><a href="/">← Übersicht</a><a href="/tv">TV</a></nav>
+  </header>
+
+  <div class="grid">
+    <div class="tile big"><div class="k"><span class="tick" id="tick"></span>Aktuell (alle 10 s)</div><div class="v" id="now">–<small>W</small></div><div class="s" id="upd">–</div></div>
+    <div class="tile"><div class="k">Netzteil 1</div><div class="v" id="p1" style="color:var(--p1)">–<small>W</small></div><div class="s">PSU1</div></div>
+    <div class="tile"><div class="k">Netzteil 2</div><div class="v" id="p2" style="color:var(--p2)">–<small>W</small></div><div class="s">PSU2</div></div>
+    <div class="tile"><div class="k">Heute</div><div class="v" id="today">–<small>kWh</small></div><div class="s" id="todayc">–</div></div>
+    <div class="tile"><div class="k">Gezählt gesamt</div><div class="v" id="total">–<small>kWh</small></div><div class="s" id="since">–</div></div>
+    <div class="tile"><div class="k">Hochgerechnet</div><div class="v" id="proj">–<small>€/Monat</small></div><div class="s" id="projs">bei aktuellem Verbrauch</div></div>
+  </div>
+
+  <div class="panel">
+    <div class="ph">
+      <h2>Verlauf</h2>
+      <div class="legend">
+        <label><input type="checkbox" data-s="w" checked hidden><i style="background:var(--w)"></i>Gesamt</label>
+        <label><input type="checkbox" data-s="p1" checked hidden><i style="background:var(--p1)"></i>PSU1</label>
+        <label><input type="checkbox" data-s="p2" checked hidden><i style="background:var(--p2)"></i>PSU2</label>
+      </div>
+      <div class="ranges" id="ranges"></div>
+    </div>
+    <div class="legend" id="rstats" style="margin-bottom:6px"></div>
+    <div class="chart" id="chartbox"><canvas id="c"></canvas><div class="tip" id="tip"></div></div>
+  </div>
+
+  <div class="panel">
+    <div class="ph"><h2>Verbrauch pro Tag</h2>
+      <div class="price" style="margin-left:auto">Strompreis <input id="price" type="number" step="0.01" min="0"> €/kWh</div>
+    </div>
+    <div class="bars" id="bars"></div>
+    <div class="note" id="barnote" style="margin-top:8px"></div>
+  </div>
+  <div class="note">Werte vom iRMC (IPMI-Sensoren „Total Power“, „PSU1/PSU2 Power“). Der Zähler integriert die Messwerte alle 10 Sekunden; auch im ausgeschalteten Zustand zieht der Server Standby-Strom.</div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const RANGES = [['15m', '15 Min'], ['1h', '1 Std'], ['6h', '6 Std'], ['24h', '24 Std'], ['7d', '7 Tage'], ['30d', '30 Tage'], ['1y', '1 Jahr']];
+const store = { get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+let range = store.get('power.range', '1h'), price = parseFloat(store.get('power.price', '0.35')) || 0.35, data = null, hover = null;
+const show = { w: true, p1: true, p2: true };
+const nf = (v, d = 0) => v == null ? '–' : v.toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+$('price').value = price;
+$('price').oninput = e => { price = parseFloat(e.target.value) || 0; store.set('power.price', price); render(); };
+$('ranges').innerHTML = RANGES.map(([k, l]) => `<button data-r="${k}">${l}</button>`).join('');
+$('ranges').onclick = e => { const r = e.target.dataset.r; if (!r) return; range = r; store.set('power.range', r); load(); };
+document.querySelectorAll('.legend input').forEach(i => i.onchange = () => { show[i.dataset.s] = i.checked; i.parentElement.style.opacity = i.checked ? 1 : .4; draw(); });
+
+async function load() {
+  try { data = await (await fetch('/api/power?range=' + range, { cache: 'no-store' })).json(); render(); }
+  catch (e) { $('upd').textContent = 'Keine Verbindung zum Dashboard'; }
+}
+
+function render() {
+  if (!data) return;
+  document.querySelectorAll('#ranges button').forEach(b => b.classList.toggle('act', b.dataset.r === range));
+  const L = data.last, st = $('state');
+  st.textContent = data.power === 'on' ? 'Server an' : data.power === 'off' ? 'Server aus (Standby)' : 'Status unbekannt';
+  st.className = 'state ' + (data.power || '');
+  if (L) {
+    $('now').innerHTML = nf(L.w) + '<small>W</small>';
+    $('p1').innerHTML = nf(L.p1) + '<small>W</small>';
+    $('p2').innerHTML = nf(L.p2) + '<small>W</small>';
+    const age = (data.now - L.t) / 1000;
+    $('upd').textContent = age > 60 ? `veraltet – letzter Wert vor ${Math.round(age / 60)} min` : `gemessen ${new Date(L.t).toLocaleTimeString('de-DE')}`;
+    $('proj').innerHTML = nf(L.w * 24 * 30 / 1000 * price, 2) + '<small>€/Monat</small>';
+    $('projs').textContent = `${nf(L.w * 24 / 1000, 2)} kWh/Tag · ${nf(L.w * 8.76 * price, 0)} €/Jahr`;
+  }
+  $('today').innerHTML = nf(data.kwhToday, 3) + '<small>kWh</small>';
+  $('todayc').textContent = nf(data.kwhToday * price, 2) + ' €';
+  $('total').innerHTML = nf(data.kwhTotal, data.kwhTotal < 10 ? 3 : 1) + '<small>kWh</small>';
+  $('since').textContent = `${nf(data.kwhTotal * price, 2)} € seit ${new Date(data.since).toLocaleDateString('de-DE')}`;
+  const S = data.stats;
+  $('rstats').innerHTML = S ? `<span>Min <b>${nf(S.min)} W</b></span><span>Ø <b>${nf(S.avg)} W</b></span><span>Max <b>${nf(S.max)} W</b></span><span>${data.points.length} Messpunkte${data.step > 10 ? ' (5-Min-Mittel)' : ''}</span>` : '<span>Noch keine Messwerte in diesem Zeitraum</span>';
+  const days = data.days, mx = Math.max(0.001, ...days.map(d => d.kwh)), todayKey = new Date().toLocaleDateString('sv-SE');
+  $('bars').innerHTML = days.length ? days.map(d => `<div class="b ${d.d === todayKey ? 'today' : ''}" title="${new Date(d.d).toLocaleDateString('de-DE')}: ${nf(d.kwh, 2)} kWh · ${nf(d.kwh * price, 2)} €"><span style="height:${d.kwh / mx * 100}%"></span><em>${d.d.slice(8)}.${d.d.slice(5, 7)}</em></div>`).join('') : '<div class="note">Erster Tag läuft – Balken erscheinen ab jetzt täglich.</div>';
+  const sum = days.reduce((a, d) => a + d.kwh, 0);
+  $('barnote').textContent = days.length ? `${days.length} ${days.length === 1 ? 'Tag' : 'Tage'}: ${nf(sum, 2)} kWh · ${nf(sum * price, 2)} €` : '';
+  draw();
+}
+
+function draw() {
+  const cv = $('c'), box = $('chartbox'), dpr = devicePixelRatio || 1, W = box.clientWidth, H = box.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr; const g = cv.getContext('2d'); g.scale(dpr, dpr); g.clearRect(0, 0, W, H);
+  if (!data || data.points.length < 2) { g.fillStyle = css('--faint'); g.font = '13px sans-serif'; g.fillText('Sammle Messwerte… (alle 10 s ein Punkt)', 50, H / 2); return; }
+  const P = data.points, pl = 46, pr = 10, pt = 10, pb = 26, cw = W - pl - pr, ch = H - pt - pb;
+  const t0 = P[0].t, t1 = Math.max(P[P.length - 1].t, t0 + 1);
+  const keys = ['w', 'p1', 'p2'].filter(k => show[k]);
+  let hi = Math.max(10, ...P.flatMap(p => keys.map(k => (k === 'w' && p.max) || p[k] || 0)));
+  const step = [5, 10, 20, 25, 50, 100, 200, 250, 500].find(s => hi / s <= 6) || 1000; hi = Math.ceil(hi * 1.08 / step) * step;
+  const X = t => pl + (t - t0) / (t1 - t0) * cw, Y = v => pt + ch - v / hi * ch;
+  g.font = '11px ui-sans-serif, system-ui, sans-serif'; g.fillStyle = css('--faint'); g.strokeStyle = css('--line'); g.lineWidth = 1;
+  for (let v = 0; v <= hi; v += step) { const y = Math.round(Y(v)) + .5; g.beginPath(); g.moveTo(pl, y); g.lineTo(W - pr, y); g.stroke(); g.textAlign = 'right'; g.fillText(v + ' W', pl - 6, y + 4); }
+  const span = t1 - t0, long = span > 2 * 86400e3, n = Math.max(2, Math.floor(cw / 110));
+  g.textAlign = 'center';
+  for (let i = 0; i <= n; i++) { const t = t0 + span * i / n, d = new Date(t);
+    g.fillText(long ? d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) : d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', ...(span < 1800e3 ? { second: '2-digit' } : {}) }), Math.min(Math.max(X(t), pl + 20), W - pr - 20), H - 8); }
+  const gap = (data.step * 1000) * 6;
+  // min/max band for aggregated ranges
+  if (show.w && P[0].max != null) {
+    g.fillStyle = 'rgba(251,191,36,.12)'; g.beginPath(); P.forEach((p, i) => i ? g.lineTo(X(p.t), Y(p.max)) : g.moveTo(X(p.t), Y(p.max)));
+    for (let i = P.length - 1; i >= 0; i--) g.lineTo(X(P[i].t), Y(P[i].min)); g.fill();
+  }
+  for (const k of keys) {
+    const col = css('--' + k); g.strokeStyle = col; g.lineWidth = k === 'w' ? 2 : 1.4; g.lineJoin = 'round'; g.beginPath();
+    let prev = null;
+    for (const p of P) { if (p[k] == null) { prev = null; continue; } const x = X(p.t), y = Y(p[k]); if (!prev || p.t - prev.t > gap) g.moveTo(x, y); else g.lineTo(x, y); prev = p; }
+    g.stroke();
+    if (k === 'w') { const grd = g.createLinearGradient(0, pt, 0, pt + ch); grd.addColorStop(0, 'rgba(251,191,36,.18)'); grd.addColorStop(1, 'rgba(251,191,36,0)');
+      g.fillStyle = grd; g.beginPath(); g.moveTo(X(P[0].t), Y(0)); P.forEach(p => g.lineTo(X(p.t), Y(p.w))); g.lineTo(X(P[P.length - 1].t), Y(0)); g.fill(); }
+  }
+  const tip = $('tip');
+  if (hover != null && hover >= pl && hover <= W - pr) {
+    const t = t0 + (hover - pl) / cw * (t1 - t0); let best = P[0]; for (const p of P) if (Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
+    const x = X(best.t); g.strokeStyle = css('--line-2'); g.beginPath(); g.moveTo(x + .5, pt); g.lineTo(x + .5, pt + ch); g.stroke();
+    for (const k of keys) if (best[k] != null) { g.fillStyle = css('--' + k); g.beginPath(); g.arc(x, Y(best[k]), 3.5, 0, 7); g.fill(); }
+    const d = new Date(best.t);
+    tip.innerHTML = `<div style="color:var(--muted)">${d.toLocaleDateString('de-DE')} ${d.toLocaleTimeString('de-DE')}</div>` +
+      `<div><b style="color:var(--w)">${nf(best.w, best.max != null ? 1 : 0)} W</b> gesamt</div>` +
+      (best.max != null ? `<div style="color:var(--muted)">${nf(best.min)}–${nf(best.max)} W</div>` : `<div style="color:var(--muted)">PSU1 ${nf(best.p1)} W · PSU2 ${nf(best.p2)} W</div>`);
+    tip.style.display = 'block'; tip.style.left = Math.min(x + 12, W - tip.offsetWidth - 4) + 'px'; tip.style.top = '12px';
+  } else tip.style.display = 'none';
+}
+$('chartbox').onmousemove = e => { hover = e.offsetX; draw(); };
+$('chartbox').onmouseleave = () => { hover = null; draw(); };
+$('chartbox').ontouchmove = e => { const r = $('chartbox').getBoundingClientRect(); hover = e.touches[0].clientX - r.left; draw(); };
+addEventListener('resize', draw);
+
+load();
+setInterval(async () => { await load(); const t = $('tick'); t.classList.add('flash'); setTimeout(() => t.classList.remove('flash'), 400); }, 10000);
+</script>
+</body>
+</html>

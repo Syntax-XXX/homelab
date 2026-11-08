@@ -1,0 +1,63 @@
+name: streaming
+networks: { media: { external: true } }
+services:
+  streamfilter:
+    image: node:22-alpine
+    container_name: streamfilter
+    restart: unless-stopped
+    command: ["node", "/app/server.js"]
+    volumes:
+      - ./streamfilter:/app:ro
+    ports:
+      - "3101:3000"
+    mem_limit: 128m
+    networks: [media]
+    depends_on: [aiostreams]
+    healthcheck: { test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/v1/status"], interval: 60s, timeout: 10s, retries: 3 }
+  aiostreams:
+    image: ghcr.io/viren070/aiostreams:latest
+    container_name: aiostreams
+    env_file: aiostreams.env
+    volumes: ["${APPDATA:-/opt/appdata}/aiostreams:/app/data"]
+    ports: ["3100:3000"]
+    networks: [media]
+    mem_limit: 512m
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    labels:
+      dashboard.name: AIOStreams
+      dashboard.group: Media
+      dashboard.description: Debrid-Quellen fuer Jellyfin
+      dashboard.url: http://aiostreams.local/stremio/configure
+  stremthru:
+    image: muniftanjim/stremthru:latest
+    container_name: stremthru
+    environment:
+      STREMTHRU_LOG_LEVEL: info
+      GOMEMLIMIT: 180MiB  # Go-GC raeumt vor dem 256m-Limit auf
+      # Nur Store-Proxy fuer Comet; Hintergrund-Worker kosten zu viel RAM
+      STREMTHRU_FEATURE: "-dmm_hashlist,-imdb_title,-probe_media_info,-meta,-newz,-sync,-stremio_list,-stremio_newz,-stremio_torz,-stremio_store,-stremio_wrap,-stremio_sidekick"
+    volumes: ["${APPDATA:-/opt/appdata}/stremthru:/app/data"]
+    networks: [media]
+    mem_limit: 256m
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    labels:
+      dashboard.hide: "true"
+  comet:
+    image: g0ldyy/comet:latest
+    container_name: comet
+    init: true
+    env_file: comet.env
+    volumes: ["${APPDATA:-/opt/appdata}/comet:/app/data"]
+    tmpfs: ["/tmp:size=64m,mode=1777"]
+    ports: ["8000:8000"]
+    networks: [media]
+    mem_limit: 640m
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    labels:
+      dashboard.name: Comet
+      dashboard.group: Media
+      dashboard.description: Stremio-Addon (Debrid)
+      dashboard.url: http://comet.local/configure

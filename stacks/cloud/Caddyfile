@@ -1,0 +1,25 @@
+{
+	auto_https off
+}
+http://nextcloud.local, http://{$HOST_IP} {
+	request_body {
+		max_size 10GB
+	}
+	redir /.well-known/carddav /remote.php/dav 301
+	redir /.well-known/caldav /remote.php/dav 301
+	reverse_proxy nextcloud:80
+}
+http://paperless.local {
+	request_body {
+		max_size 500MB
+	}
+	reverse_proxy paperless:8000
+}
+http://guacamole.local {
+	reverse_proxy guacamole:8080 {
+		flush_interval -1
+	}
+}
+http://obsidian.local {
+	reverse_proxy couchdb:5984
+}

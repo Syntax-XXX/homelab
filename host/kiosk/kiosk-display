@@ -1,0 +1,9 @@
+#!/bin/sh
+# kiosk-display on|off – Monitor am Kiosk ein-/ausschalten (X-DPMS + DDC/CI-Standby)
+A=$(ls -t /tmp/serverauth.* 2>/dev/null | head -1)
+x() { DISPLAY=:0 XAUTHORITY="$A" runuser -u kiosk -- "$@"; }
+case "$1" in
+  off) x xset +dpms; x xset dpms force off; timeout 20 ddcutil -d 1 setvcp d6 5 >/dev/null 2>&1; logger -t kiosk-display "Monitor aus" ;;
+  on)  timeout 20 ddcutil -d 1 setvcp d6 1 >/dev/null 2>&1; systemctl restart kiosk.service; logger -t kiosk-display "Monitor an (Kiosk neu geladen)" ;;
+  *) echo "usage: $0 on|off"; exit 1 ;;
+esac
