@@ -1,6 +1,5 @@
 #!/bin/sh
 # Installs/updates the dashboard stats agent on every other cluster node that is reachable.
-TOKEN=$(cat /etc/selfhost-dash/token); ATOKEN=$(cat /etc/selfhost-dash/action_token)
 SELF=$(hostname)
 for PEER in $(pvesh get /cluster/status --output-format json | python3 -c 'import json,sys;[print(n["ip"]) for n in json.load(sys.stdin) if n["type"]=="node" and n.get("ip") and n["name"]!="'$SELF'"]'); do
   SSH="ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/pve/priv/known_hosts root@$PEER"
@@ -10,7 +9,10 @@ for PEER in $(pvesh get /cluster/status --output-format json | python3 -c 'impor
   CODE=$(curl -s -o /dev/null -m 4 -w '%{http_code}' "http://$PEER:9101/stats")
   [ "$LOCAL" = "$REMOTE" ] && [ "$CODE" = "401" ] && continue
   echo "deploying agent to $PEER (http: $CODE)"
-  $SSH "mkdir -p /opt/selfhost-dash-agent /etc/selfhost-dash && umask 077 && printf '%s\n' '$TOKEN' > /etc/selfhost-dash/token && printf '%s\n' '$ATOKEN' > /etc/selfhost-dash/action_token"
+  # Tokens per stdin übertragen – tauchen so weder in der lokalen noch in der entfernten Prozessliste auf
+  $SSH "mkdir -p /opt/selfhost-dash-agent /etc/selfhost-dash"
+  $SSH "umask 077 && cat > /etc/selfhost-dash/token" < /etc/selfhost-dash/token
+  $SSH "umask 077 && cat > /etc/selfhost-dash/action_token" < /etc/selfhost-dash/action_token
   $SSH "cat > /opt/selfhost-dash-agent/agent.py" < /opt/selfhost-dash-agent/agent.py
   $SSH "cat > /etc/systemd/system/selfhost-dash-agent.service" < /etc/systemd/system/selfhost-dash-agent.service
   $SSH "chmod 755 /opt/selfhost-dash-agent/agent.py && systemctl daemon-reload && systemctl enable selfhost-dash-agent >/dev/null 2>&1 && systemctl restart selfhost-dash-agent"

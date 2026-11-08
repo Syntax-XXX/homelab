@@ -9,6 +9,7 @@ services:
     mem_limit: 256m
     volumes:
       - ./data:/data
+      - ${GIT_STORAGE:-/srv/git}/workspace:/workspace   # Befunde landen als .review/REVIEW.md im Projektordner
     ports:
       - "3200:3000"
     healthcheck: { test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"], interval: 60s, timeout: 10s, retries: 3 }

@@ -10,9 +10,19 @@ NAME=${RUNNER_NAME:-$(hostname)}
 CAPACITY=${CAPACITY:-4}
 export DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
 apt-get update -qq && apt-get install -y -qq ca-certificates curl gnupg git >/dev/null
-if ! command -v docker >/dev/null; then curl -fsSL https://get.docker.com | sh; fi
-curl -fsSL -o /usr/local/bin/forgejo-runner "https://code.forgejo.org/forgejo/runner/releases/download/v${RUNNER_VERSION}/forgejo-runner-${RUNNER_VERSION}-linux-amd64"
-chmod +x /usr/local/bin/forgejo-runner
+install_docker() { # offizielles Docker-APT-Repo (GPG-signiert) statt "curl | sh"
+  . /etc/os-release
+  local distro=$ID; [ "$distro" = "ubuntu" ] || distro=debian
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL "https://download.docker.com/linux/$distro/gpg" | gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$distro ${VERSION_CODENAME} stable" | tee /etc/apt/sources.list.d/docker.list >/dev/null
+  apt-get update -qq && apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+}
+command -v docker >/dev/null || install_docker
+BIN="forgejo-runner-${RUNNER_VERSION}-linux-amd64"; URL="https://code.forgejo.org/forgejo/runner/releases/download/v${RUNNER_VERSION}"
+TMP=$(mktemp -d); curl -fsSL -o "$TMP/$BIN" "$URL/$BIN"; curl -fsSL -o "$TMP/$BIN.sha256" "$URL/$BIN.sha256"
+(cd "$TMP" && sha256sum -c "$BIN.sha256") || { echo "Prüfsumme falsch – Abbruch"; exit 1; }
+install -m 755 "$TMP/$BIN" /usr/local/bin/forgejo-runner; rm -rf "$TMP"
 id runner >/dev/null 2>&1 || useradd -r -m -d /var/lib/forgejo-runner -s /bin/bash -G docker runner
 cd /var/lib/forgejo-runner
 /usr/local/bin/forgejo-runner generate-config > config.yml
@@ -27,7 +37,10 @@ s=s.replace('  docker_host: "-"\n','  docker_host: "automount"\n',1)
 open(p,"w").write(s)
 PY
 mkdir -p /mnt/builds
-/usr/local/bin/forgejo-runner register --no-interactive --config config.yml --instance "$FORGEJO_URL" --token "$RUNNER_TOKEN" --name "$NAME" \
+TOKFILE=$(mktemp); chmod 600 "$TOKFILE"; printf '%s' "$RUNNER_TOKEN" > "$TOKFILE"; unset RUNNER_TOKEN
+trap 'rm -f "$TOKFILE"' EXIT
+# Hinweis: Der Registrierungs-Token ist ein Einmal-Token und nach dem Register wertlos.
+/usr/local/bin/forgejo-runner register --no-interactive --config config.yml --instance "$FORGEJO_URL" --token "$(cat "$TOKFILE")" --name "$NAME" \
   --labels "ubuntu-latest:docker://ghcr.io/catthehacker/ubuntu:act-24.04,debian:docker://node:22-bookworm,docker:docker://node:22-bookworm"
 chown -R runner:runner /var/lib/forgejo-runner
 cat > /etc/systemd/system/forgejo-runner.service <<UNIT

@@ -4,7 +4,13 @@ import json, os, socket, subprocess, threading, time, hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(os.environ.get("PORT", "9101"))
-TOKEN = open("/etc/selfhost-dash/token").read().strip()
+def _read_secret(p):
+    try:
+        if os.stat(p).st_mode & 0o077: print(f"Warnung: {p} ist für andere lesbar – chmod 600 empfohlen", flush=True)
+        return open(p).read().strip()
+    except FileNotFoundError:
+        raise SystemExit(f"{p} fehlt – siehe docs/08-monitoring-dashboard.md (Agents)")
+TOKEN = _read_secret("/etc/selfhost-dash/token")
 try: ACTION_TOKEN = open("/etc/selfhost-dash/action_token").read().strip()
 except FileNotFoundError: ACTION_TOKEN = None
 GUEST_OPS = {"start", "shutdown", "stop", "reboot"}

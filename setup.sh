@@ -5,6 +5,14 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 B=$'\e[1m'; G=$'\e[32m'; Y=$'\e[33m'; N=$'\e[0m'
+install_docker() { # offizielles Docker-APT-Repo (GPG-signiert) statt "curl | sh"
+  . /etc/os-release
+  local distro=$ID; [ "$distro" = "ubuntu" ] || distro=debian
+  sudo install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL "https://download.docker.com/linux/$distro/gpg" | sudo gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$distro ${VERSION_CODENAME} stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+  sudo apt-get update -qq && sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+}
 say() { echo "${B}==>${N} $*"; }
 rand() { local s; s=$(openssl rand -base64 48); s=${s//[^A-Za-z0-9]/}; printf '%s' "${s:0:${1:-24}}"; }
 fill() { # ersetzt __RANDOM__ / __HEX64__ / __HOST_IP__ in einer Datei
@@ -20,9 +28,10 @@ fill() { # ersetzt __RANDOM__ / __HEX64__ / __HOST_IP__ in einer Datei
 # ---------- 1. Docker
 if ! command -v docker >/dev/null 2>&1; then
   say "Docker ist nicht installiert."
-  read -rp "Jetzt über get.docker.com installieren? [J/n] " a
+  read -rp "Jetzt aus dem offiziellen Docker-APT-Repo installieren? [J/n] " a
   [[ ${a:-j} =~ ^[JjYy]$ ]] || { echo "Abbruch."; exit 1; }
-  curl -fsSL https://get.docker.com | sh
+  sudo apt-get install -y -qq ca-certificates curl gnupg >/dev/null
+  install_docker
   sudo usermod -aG docker "$USER" || true
 fi
 docker compose version >/dev/null || { echo "docker compose (v2) fehlt"; exit 1; }
@@ -33,7 +42,8 @@ if [ ! -f .env ]; then
   DEF_IP=$(hostname -I | awk '{print $1}')
   read -rp "IP dieses Servers im LAN [$DEF_IP]: " HOST_IP; HOST_IP=${HOST_IP:-$DEF_IP}
   read -rp "Zeitzone [Europe/Berlin]: " TZV; TZV=${TZV:-Europe/Berlin}
-  sed -i "s#^HOST_IP=.*#HOST_IP=$HOST_IP#; s#^TZ=.*#TZ=$TZV#; s#^PUID=.*#PUID=$(id -u)#; s#^PGID=.*#PGID=$(id -g)#" .env
+  read -rp "Admin-Benutzername für die Apps [$(whoami)]: " ADM; ADM=${ADM:-$(whoami)}
+  sed -i "s#^HOST_IP=.*#HOST_IP=$HOST_IP#; s#^TZ=.*#TZ=$TZV#; s#^ADMIN_USER=.*#ADMIN_USER=$ADM#; s#^PUID=.*#PUID=$(id -u)#; s#^PGID=.*#PGID=$(id -g)#" .env
   DGID=$(getent group docker | cut -d: -f3 || true); [ -n "$DGID" ] && sed -i "s#^DOCKER_GID=.*#DOCKER_GID=$DGID#" .env
   fill .env
   say "${G}.env erstellt${N} (Passwörter zufällig, chmod 600)"

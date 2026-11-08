@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TOKEN = open("/etc/selfhost-dash/token").read().strip()
 ATOKEN = open("/etc/selfhost-dash/action_token").read().strip()
-BIND, PORT = os.environ.get("BIND", "0.0.0.0"), int(os.environ.get("PORT", "9102"))
+BIND, PORT = os.environ.get("BIND", "127.0.0.1"), int(os.environ.get("PORT", "9102"))  # LAN-IP per BIND setzen
 ID = r"[0-9a-f]{12,64}"
 READ = [re.compile(p) for p in (r"^/containers/json(\?[\w=&%.-]*)?$", rf"^/containers/{ID}/(json|stats)(\?[\w=&%.-]*)?$",
                                 rf"^/containers/{ID}/logs\?[\w=&%.-]*$", r"^/_ping$")]

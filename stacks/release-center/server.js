@@ -88,9 +88,11 @@ async function reviewNow(item) {
 
     // LLM review – Groq free tier allows ~8k tokens/min, so big diffs are reviewed in chunks
     if (!CFG.groqKey) { item.ai = { verdict: 'warn', summary: 'Keine KI konfiguriert (GROQ_API_KEY fehlt).', findings: [] }; }
+    else if (!diff.trim()) item.ai = { verdict: 'ok', summary: 'Keine Änderungen seit dem letzten GitHub-Push – nichts zu prüfen.', findings: [], model: CFG.groqModel, chunks: 0 };
     else item.ai = await aiReview(item, diff, stat, hasBase);
     if (item.secrets.length && item.ai.verdict === 'ok') item.ai.verdict = 'warn';
     item.status = 'pending'; item.reviewedAt = Date.now();
+    writeReport(item);
     log('reviewed', item.repo, item.sha.slice(0, 7), item.ai.verdict, 'secrets:', item.secrets.length);
     const icon = { ok: '✅', warn: '⚠️', block: '⛔' }[item.ai.verdict];
     notifyItem(item);
@@ -164,6 +166,66 @@ async function aiReview(item, diff, stat, hasBase) {
     findings, model: CFG.groqModel, chunks: todo.length, skipped };
 }
 
+
+// ---------- Befunde in den Projektordner (Workspace) schreiben – für die KI im Editor
+// Ohne Commit (sonst neuer Build -> neue Prüfung -> Schleife); .review/ wird per .git/info/exclude ignoriert.
+const WORKSPACE = E.WORKSPACE_DIR || '';
+function workspaceFor(full) {
+  if (!WORKSPACE || !fs.existsSync(WORKSPACE)) return null;
+  const want = '/' + full.toLowerCase() + '.git';
+  for (const d of fs.readdirSync(WORKSPACE)) {
+    try {
+      const cfg = fs.readFileSync(path.join(WORKSPACE, d, '.git', 'config'), 'utf8').toLowerCase();
+      const m = /\[remote "origin"\][^[]*?url\s*=\s*(\S+)/.exec(cfg);
+      if (m && (m[1].endsWith(want) || m[1].endsWith(want.replace(/\.git$/, '')))) return path.join(WORKSPACE, d);
+    } catch {}
+  }
+  return null;
+}
+function writeReport(item) {
+  try {
+    const dir = workspaceFor(item.repo); if (!dir) return null;
+    const rd = path.join(dir, '.review'); fs.mkdirSync(rd, { recursive: true });
+    const ex = path.join(dir, '.git', 'info', 'exclude');
+    try { const t = fs.existsSync(ex) ? fs.readFileSync(ex, 'utf8') : ''; if (!t.includes('.review/')) fs.appendFileSync(ex, (t.endsWith('\n') || !t ? '' : '\n') + '.review/\n'); } catch {}
+    const a = item.ai || {}, f = a.findings || [], sec = item.secrets || [];
+    const when = new Date(item.reviewedAt || Date.now()).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' });
+    const md = `# Review-Befunde – ${item.repo}
+
+> Automatisch erzeugt vom Release-Center (${when}). Diese Datei wird **nicht** committet (\`.git/info/exclude\`).
+
+| | |
+|---|---|
+| Commit | \`${item.sha.slice(0, 8)}\` – ${item.title} |
+| KI-Urteil | ${{ ok: '✅ ok', warn: '⚠️ prüfen', block: '⛔ nicht pushen' }[a.verdict] || '–'} (${a.model || 'keine KI'}${a.skipped ? `, ${a.skipped} Teile nicht von der KI geprüft` : ''}) |
+| gitleaks | ${sec.length ? `🔑 ${sec.length} mögliche Secrets` : 'keine Secrets'} |
+
+## Zusammenfassung
+
+${a.summary || '–'}
+
+## Befunde
+
+${f.length ? f.map((x, i) => `${i + 1}. **[${x.severity || '?'}]** \`${x.file || '?'}${x.line ? ':' + x.line : ''}\` – ${x.text}`).join('\n') : 'Keine.'}
+${sec.length ? `\n## gitleaks\n\n${sec.map(s => `- \`${s.file}:${s.line}\` – ${s.rule} (${s.desc || ''})`).join('\n')}\n` : ''}
+## Auftrag an die KI im Editor
+
+1. Gehe die Befunde oben der Reihe nach durch und prüfe jeden **im echten Code** – die Review-KI hat nur einen Diff gesehen und kann sich irren.
+2. Behebe echte Probleme mit möglichst kleinen, sauberen Änderungen. Keine neuen Abhängigkeiten ohne Grund.
+3. Ist ein Befund ein Fehlalarm oder eine bewusste Design-Entscheidung, ändere nichts, sondern notiere es unten unter „Bewertung“ mit kurzer Begründung.
+4. Niemals echte Passwörter/Tokens in Dateien schreiben – Werte gehören in \`.env\` (nicht im Repo) bzw. \`*.env.example\` mit Platzhaltern.
+5. Am Ende: Build lokal testen (falls möglich), dann committen und pushen – das Release-Center prüft automatisch neu.
+
+## Bewertung (von der Editor-KI auszufüllen)
+
+`;
+    fs.writeFileSync(path.join(rd, 'REVIEW.md'), md);
+    fs.writeFileSync(path.join(rd, 'review.json'), JSON.stringify({ repo: item.repo, sha: item.sha, title: item.title, verdict: a.verdict, summary: a.summary, findings: f, secrets: sec, reviewedAt: item.reviewedAt }, null, 2));
+    item.reportPath = path.join(path.basename(dir), '.review', 'REVIEW.md');
+    return item.reportPath;
+  } catch (e) { log('report', e.message); return null; }
+}
+
 // ---------- push to GitHub
 async function push(item, { visibility, ghName, force }) {
   if (!CFG.ghUser || !CFG.ghToken) throw new Error('GitHub ist nicht verbunden (GITHUB_USER / GITHUB_TOKEN fehlen).');
@@ -228,6 +290,7 @@ function itemText(it, details = false) {
   if (details && it.ai?.findings?.length) t += '\n\n' + it.ai.findings.slice(0, 10).map(f => `• <i>${esc(f.severity)}</i> ${esc(f.file || '')}${f.line ? ':' + f.line : ''} – ${esc(f.text)}`).join('\n');
   if (details && it.secrets?.length) t += '\n\n' + it.secrets.slice(0, 8).map(s => `🔑 ${esc(s.file)}:${s.line} (${esc(s.rule)})`).join('\n');
   if (it.error) t += `\n\nFehler: ${esc(it.error).slice(0, 300)}`;
+  if (it.reportPath && it.status === 'pending') t += `\n📝 Befunde: <code>workspace/${esc(it.reportPath)}</code>`;
   if (it.ghUrl) t += `\n${it.ghUrl}`;
   return t.slice(0, 4000);
 }
