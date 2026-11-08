@@ -90,7 +90,7 @@ function card(it) {
   const v = it.ai?.verdict, cls = it.status === 'pushed' ? 'pushed' : it.status === 'error' ? 'error' : it.status === 'failed' ? 'failed' : (v || '');
   const known = S.repos[it.repo]; const first = !known?.pushedSha;
   let body = '';
-  if (it.status === 'queued' || it.status === 'reviewing') body = `<div class="sub"><span class="spin"></span> KI und Secret-Scan laufen …</div>`;
+  if (it.status === 'queued' || it.status === 'reviewing') body = `<div class="sub"><span class="spin"></span> ${esc(it.progress || 'KI und Secret-Scan laufen …')}</div>`;
   else if (it.status === 'failed') body = `<div class="err">Der Build ist fehlgeschlagen – siehe <a href="${esc(it.runUrl)}" target="_blank">Log</a>.</div>`;
   else if (it.ai) body = `<div class="verdict ${v}">${VERD[v]}</div><div class="summary">${esc(it.ai.summary)}</div>` +
       (it.secrets?.length ? `<div class="secrets">🔑 Gitleaks: ${it.secrets.length} mögliche Secrets – ${it.secrets.slice(0,5).map(s => `<span class="mono">${esc(s.file)}:${s.line}</span> (${esc(s.rule)})`).join(', ')}</div>` : '') +

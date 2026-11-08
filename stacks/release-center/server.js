@@ -82,26 +82,9 @@ async function review(item) {
     fs.rmSync(rep, { force: true });
     await sh('git', ['-C', dir, 'worktree', 'remove', '--force', wt], { allowFail: true });
 
-    // LLM review
+    // LLM review – Groq free tier allows ~8k tokens/min, so big diffs are reviewed in chunks
     if (!CFG.groqKey) { item.ai = { verdict: 'warn', summary: 'Keine KI konfiguriert (GROQ_API_KEY fehlt).', findings: [] }; }
-    else {
-      const MAX = 45000;
-      const truncated = diff.length > MAX;
-      if (truncated) diff = diff.slice(0, MAX);
-      const sys = `Du bist ein strenger Code-Reviewer für ein privates Homelab-Projekt, das gleich auf GitHub veröffentlicht werden soll.
-Prüfe den Diff auf: 1) Secrets/Passwörter/Tokens/API-Keys/private IPs+Zugangsdaten, 2) Sicherheitslücken (Injection, unsichere Defaults, offene Ports ohne Auth, curl|bash), 3) offensichtliche Bugs, 4) ob es sinnvoll zum Veröffentlichen ist.
-Antworte NUR als JSON: {"verdict":"ok"|"warn"|"block","summary":"2-4 Sätze auf Deutsch","findings":[{"severity":"hoch"|"mittel"|"niedrig","file":"pfad","line":0,"text":"kurz auf Deutsch"}]}.
-"block" nur bei echten Secrets oder schweren Sicherheitsproblemen. Maximal 10 Findings.`;
-      const usr = `Repository: ${item.repo}\nCommit: ${item.title}\nÄnderungen: ${hasBase ? 'seit letztem GitHub-Push' : 'kompletter Stand (noch nie gepusht)'}\nGitleaks-Treffer: ${item.secrets.length ? JSON.stringify(item.secrets.slice(0, 20)) : 'keine'}\n${truncated ? '(Diff gekürzt)\n' : ''}\nDIFF-STAT:\n${stat.slice(-3000)}\n\nDIFF:\n${diff}`;
-      const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST', headers: { Authorization: 'Bearer ' + CFG.groqKey, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(120000),
-        body: JSON.stringify({ model: CFG.groqModel, temperature: 0.1, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: sys }, { role: 'user', content: usr }] }),
-      });
-      const j = await r.json();
-      if (!r.ok) throw new Error('Groq: ' + (j.error?.message || r.status));
-      const ai = JSON.parse(j.choices[0].message.content);
-      item.ai = { verdict: ['ok', 'warn', 'block'].includes(ai.verdict) ? ai.verdict : 'warn', summary: String(ai.summary || ''), findings: Array.isArray(ai.findings) ? ai.findings.slice(0, 12) : [], model: CFG.groqModel, truncated };
-    }
+    else item.ai = await aiReview(item, diff, stat, hasBase);
     if (item.secrets.length && item.ai.verdict === 'ok') item.ai.verdict = 'warn';
     item.status = 'pending'; item.reviewedAt = Date.now();
     log('reviewed', item.repo, item.sha.slice(0, 7), item.ai.verdict, 'secrets:', item.secrets.length);
@@ -111,6 +94,71 @@ Antworte NUR als JSON: {"verdict":"ok"|"warn"|"block","summary":"2-4 Sätze auf 
   save();
 }
 const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+
+// ---------- Groq review with chunking + rate-limit handling
+const CHUNK = +E.AI_CHUNK_CHARS || 14000, MAX_CHUNKS = +E.AI_MAX_CHUNKS || 8;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function groq(messages, maxTokens = 1500) {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST', headers: { Authorization: 'Bearer ' + CFG.groqKey, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(120000),
+      body: JSON.stringify({ model: CFG.groqModel, temperature: 0.1, max_tokens: maxTokens, response_format: { type: 'json_object' }, messages }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) return JSON.parse(j.choices[0].message.content);
+    const msg = j.error?.message || String(r.status);
+    if (r.status === 429 || /rate limit|try again/i.test(msg)) {
+      const m = /try again in ([\d.]+)(ms|s|m)/i.exec(msg); const wait = m ? (+m[1]) * ({ ms: 1, s: 1000, m: 60000 }[m[2]]) : 30000;
+      log('groq rate limit, warte', Math.round(wait / 1000), 's'); await sleep(Math.min(wait + 1500, 90000)); continue;
+    }
+    throw new Error('Groq: ' + msg);
+  }
+  throw new Error('Groq: zu viele Rate-Limit-Versuche');
+}
+const SYS = `Du bist ein strenger Code-Reviewer für ein privates Homelab-Projekt, das gleich auf GitHub veröffentlicht werden soll.
+Prüfe auf: 1) Secrets/Passwörter/Tokens/API-Keys/private Zugangsdaten, 2) Sicherheitslücken (Injection, unsichere Defaults, offene Ports ohne Auth, curl|bash), 3) offensichtliche Bugs, 4) ob es sinnvoll zum Veröffentlichen ist.
+Platzhalter wie __RANDOM__, \${VAR}, leere Werte in *.env.example und private LAN-IPs sind KEINE Secrets.
+Antworte NUR als JSON: {"verdict":"ok"|"warn"|"block","summary":"2-3 Sätze auf Deutsch","findings":[{"severity":"hoch"|"mittel"|"niedrig","file":"pfad","line":0,"text":"kurz auf Deutsch"}]}.
+"block" nur bei echten Secrets oder schweren Sicherheitsproblemen. Maximal 8 Findings.`;
+async function aiReview(item, diff, stat, hasBase) {
+  // split per file, code/config first, docs last; pack into chunks
+  const files = diff.split(/(?=^diff --git )/m).filter(Boolean);
+  const isDoc = f => /^diff --git a\/\S+\.(md|txt)\b/.test(f);
+  files.sort((a, b) => isDoc(a) - isDoc(b));
+  const chunks = []; let cur = '';
+  for (let f of files) {
+    if (f.length > CHUNK) f = f.slice(0, CHUNK) + '\n[... Datei gekürzt ...]\n';
+    if (cur.length + f.length > CHUNK) { chunks.push(cur); cur = ''; }
+    cur += f;
+  }
+  if (cur) chunks.push(cur);
+  const skipped = Math.max(0, chunks.length - MAX_CHUNKS);
+  const todo = chunks.slice(0, MAX_CHUNKS);
+  const head = `Repository: ${item.repo}\nCommit: ${item.title}\nÄnderungen: ${hasBase ? 'seit letztem GitHub-Push' : 'kompletter Stand (noch nie gepusht)'}\nGitleaks-Treffer: ${item.secrets.length ? JSON.stringify(item.secrets.slice(0, 20)) : 'keine'}\n`;
+  const parts = [];
+  for (let i = 0; i < todo.length; i++) {
+    item.progress = `KI prüft Teil ${i + 1}/${todo.length}`; save();
+    const res = await groq([{ role: 'system', content: SYS }, { role: 'user', content: `${head}Teil ${i + 1} von ${todo.length}${i === 0 ? `\nDIFF-STAT:\n${stat.slice(-1500)}` : ''}\n\nDIFF:\n${todo[i]}` }]);
+    parts.push(res);
+  }
+  const rank = { ok: 0, warn: 1, block: 2 };
+  const verdict = parts.reduce((v, p) => (rank[p.verdict] ?? 1) > rank[v] ? p.verdict : v, 'ok');
+  let findings = parts.flatMap(p => Array.isArray(p.findings) ? p.findings : []);
+  const sev = { hoch: 0, mittel: 1, niedrig: 2 }; findings.sort((a, b) => (sev[a.severity] ?? 3) - (sev[b.severity] ?? 3)); findings = findings.slice(0, 12);
+  let summary = parts[0]?.summary || '';
+  if (parts.length > 1) {
+    item.progress = 'KI fasst zusammen'; save();
+    try {
+      const m = await groq([{ role: 'system', content: 'Fasse mehrere Teil-Reviews eines Repositories zu EINEM Urteil zusammen. Antworte NUR als JSON {"summary":"3-4 Sätze auf Deutsch"}.' },
+        { role: 'user', content: JSON.stringify(parts.map(p => ({ verdict: p.verdict, summary: p.summary }))) }], 600);
+      summary = m.summary || summary;
+    } catch { summary = parts.map(p => p.summary).join(' '); }
+  }
+  item.progress = null;
+  return { verdict: ['ok', 'warn', 'block'].includes(verdict) ? verdict : 'warn', summary: String(summary) + (skipped ? ` (Hinweis: ${skipped} weitere Teile wurden aus Zeitgründen nicht von der KI geprüft – gitleaks hat alles geprüft.)` : ''),
+    findings, model: CFG.groqModel, chunks: todo.length, skipped };
+}
 
 // ---------- push to GitHub
 async function push(item, { visibility, ghName, force }) {
